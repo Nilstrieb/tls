@@ -1,82 +1,108 @@
-use std::io::{self, Read, Write};
+use std::{
+    fmt::Debug,
+    io::{self, Read, Write},
+    marker::PhantomData,
+};
 
 use byteorder::{BigEndian as B, ReadBytesExt, WriteBytesExt};
 
 use crate::ErrorKind;
 
 // https://datatracker.ietf.org/doc/html/rfc8446#section-4
-macro_rules! handshake {
-    ($(#[$meta:meta])* pub enum Handshake {
+macro_rules! proto_enum {
+    ($(#[$meta:meta])* pub enum $name:ident: $discr_ty:ty {
         $(
-            $KindName:ident {
+            $KindName:ident $({
                 $(
                     $field_name:ident : $field_ty:ty,
                 )*
-            } = $discriminant:expr,
+            })? = $discriminant:expr,
         )*
     }) => {
         $(#[$meta])*
-        pub enum Handshake {
+        pub enum $name {
             $(
-                $KindName {
+                $KindName $({
                     $(
                         $field_name: $field_ty,
                     )*
-                },
+                })?,
             )*
         }
 
-        impl Handshake {
-            fn write(self, w: &mut impl Write) -> io::Result<()> {
+        impl Value for $name {
+            fn write<W: Write>(&self, mut w: W) -> io::Result<()> {
+                mod discr_consts {
+                    $(
+                        #[allow(non_upper_case_globals)]
+                        pub(super) const $KindName: $discr_ty = $discriminant;
+                    )*
+                }
+
                 match self {
                     $(
-                        Self::$KindName {
+                        Self::$KindName $( {
                             $( $field_name, )*
-                        } => {
-                            $(
-                                Value::write($field_name, &mut *w)?;
-                            )*
+                        } )? => {
+                            Value::write(&discr_consts::$KindName, &mut w)?;
+                            $($(
+                                Value::write($field_name, &mut w)?;
+                            )*)?
                             Ok(())
                         }
                     )*
                 }
             }
 
-            fn read(r: &mut impl Read) -> crate::Result<Self> {
-                let kind = r.read_u8()?;
+            fn read<R: Read>(mut r: R) -> crate::Result<Self> {
+                mod discr_consts {
+                    $(
+                        #[allow(non_upper_case_globals)]
+                        pub(super) const $KindName: $discr_ty = $discriminant;
+                    )*
+                }
+
+                let kind: $discr_ty = Value::read(&mut r)?;
                 match kind {
                     $(
-                        $discriminant => {
-                            let ( $( $field_name ),* ) = ($( { discard!($field_name); Value::read(&mut *r)? } ),*);
+                        discr_consts::$KindName => {
+                            $(let ( $( $field_name ),* ) = ($( { discard!($field_name); Value::read(&mut r)? } ),*);)?
 
-                            Ok(Self::$KindName {
+                            Ok(Self::$KindName $({
                                 $(
                                     $field_name,
                                 )*
-                            })
+                            })*)
                         },
                     )*
 
-                    _ => Err(ErrorKind::InvalidHandshake(kind).into()),
+                    _ => Err(ErrorKind::InvalidHandshake(Box::new(kind)).into()),
                 }
             }
         }
     };
 }
 
-handshake! {
-    #[derive(Debug, Clone, Copy)]
-    pub enum Handshake {
+proto_enum! {
+    #[derive(Debug, Clone)]
+    pub enum Handshake: u8 {
         // https://datatracker.ietf.org/doc/html/rfc8446#section-4.1.2
         ClientHello {
             legacy_version: u16,
             random: [u8; 32],
             legacy_session_id: u8,
-            cipher_suites: [u8; 2],
+            cipher_suites: List<CipherSuite, u16>,
             legacy_compressions_methods: u8,
-            extensions: u16,
+            extensions: List<Extension, u16>,
         } = 1,
-        ServerHello {} = 2,
+        ServerHello {
+            legacy_version: u16,
+            random: [u8; 32],
+            legacy_session_id_echo: u8,
+            cipher_suite: CipherSuite,
+            legacy_compression_method: u8,
+            extensions: List<Extension, u16>,
+        } = 2,
         NewSessionTicket {} = 4,
         EndOfEarlyData {} = 5,
         EncryptedExtensions {} = 8,
@@ -91,6 +117,83 @@ handshake! {
 
 pub const LEGACY_VERSION: u16 = 0x0303; // TLS v1.2
 
+proto_enum! {
+    #[derive(Debug, Clone, Copy)]
+    pub enum CipherSuite: [u8; 2] {
+        TlsAes128GcmSha256 = [0x13, 0x01],
+        TlsAes256GcmSha384 = [0x13, 0x02],
+        TlsChacha20Poly1305Sha256 = [0x13, 0x03],
+        TlsAes128CcmSha256 = [0x13, 0x04],
+        TlsAes128Ccm8Sha256 = [0x13, 0x05],
+    }
+}
+
+pub type Extension = (ExtensionType, List<u8, u16>);
+
+proto_enum! {
+    #[derive(Debug, Clone, Copy)]
+    pub enum ExtensionType: u16 {
+        ServerName = 0,
+        MaxFragmentLength = 1,
+        StatusRequest = 5,
+        SupportedGroups = 10,
+        SignatureAlgorithms = 13,
+        UseSrtp = 14,
+        Heartbeat = 15,
+        ApplicationLayerProtocolNegotiation = 16,
+        SignedCertificateTimestamp = 18,
+        ClientCertificateType = 19,
+        ServerCertificateType = 20,
+        Padding = 21,
+        PreSharedKey = 41,
+        EarlyData = 42,
+        SupportedVersions = 43,
+        Cookie = 44,
+        PskKeyExchangeModes = 45,
+        CertificateAuthorities = 47,
+        OidFilters = 48,
+        PostHandshakeAuth = 49,
+        SignatureAlgorithmsCert = 50,
+        KeyShare = 51,
+    }
+}
+
+#[derive(Clone)]
+pub struct List<T, Len>(Vec<T>, PhantomData<Len>);
+
+impl<T, Len: Value> From<Vec<T>> for List<T, Len> {
+    fn from(value: Vec<T>) -> Self {
+        Self(value, PhantomData)
+    }
+}
+
+impl<T: Debug, Len> Debug for List<T, Len> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.0.iter()).finish()
+    }
+}
+
+impl<T: Value, Len: Value + Into<usize> + TryFrom<usize>> Value for List<T, Len> {
+    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
+        let len: usize = Len::read(&mut r)?.into();
+        let mut v = Vec::with_capacity(len.max(1000));
+        for _ in 0..len {
+            v.push(T::read(&mut r)?);
+        }
+        Ok(Self(v, PhantomData))
+    }
+    fn write<W: io::Write>(&self, w: W) -> io::Result<()> {
+        Len::write(
+            &self
+                .0
+                .len()
+                .try_into()
+                .unwrap_or_else(|_| panic!("list is too large for domain: {}", self.0.len())),
+            w,
+        )
+    }
+}
+
 pub fn write_handshake<W: Write>(w: &mut W, handshake: Handshake) -> io::Result<()> {
     handshake.write(w)
 }
@@ -99,41 +202,53 @@ pub fn read_handshake<R: Read>(r: &mut R) -> crate::Result<Handshake> {
     Handshake::read(r)
 }
 
-trait Value: Sized + Copy {
-    fn write<W: io::Write>(self, w: W) -> io::Result<()>;
-    fn read<R: io::Read>(r: R) -> io::Result<Self>;
+pub trait Value: Sized + std::fmt::Debug {
+    fn write<W: io::Write>(&self, w: W) -> io::Result<()>;
+    fn read<R: io::Read>(r: R) -> crate::Result<Self>;
 }
 
 impl<V: Value, const N: usize> Value for [V; N] {
-    fn write<W: io::Write>(self, mut w: W) -> io::Result<()> {
-        self.into_iter().map(|v| Value::write(v, &mut w)).collect()
+    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
+        self.iter().map(|v| Value::write(v, &mut w)).collect()
     }
-    fn read<R: io::Read>(mut r: R) -> io::Result<Self> {
+    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
         // ugly :(
-        let mut values = [None; N];
-        for i in 0..N {
+        let mut values = Vec::with_capacity(N);
+        for _ in 0..N {
             let value = V::read(&mut r)?;
-            values[i] = Some(value);
+            values.push(value);
         }
-        Ok(values.map(Option::unwrap))
+        Ok(values.try_into().unwrap())
     }
 }
 
 impl Value for u8 {
-    fn write<W: io::Write>(self, mut w: W) -> io::Result<()> {
-        w.write_u8(self)
+    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
+        w.write_u8(*self)
     }
-    fn read<R: io::Read>(mut r: R) -> io::Result<Self> {
-        r.read_u8()
+    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
+        r.read_u8().map_err(Into::into)
     }
 }
 
 impl Value for u16 {
-    fn write<W: io::Write>(self, mut w: W) -> io::Result<()> {
-        w.write_u16::<B>(self)
+    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
+        w.write_u16::<B>(*self)
     }
-    fn read<R: io::Read>(mut r: R) -> io::Result<Self> {
-        r.read_u16::<B>()
+    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
+        r.read_u16::<B>().map_err(Into::into)
+    }
+}
+
+impl<T: Value, U: Value> Value for (T, U) {
+    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
+        T::write(&self.0, &mut w)?;
+        T::write(&self.0, &mut w)?;
+        Ok(())
+    }
+
+    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
+        Ok((T::read(&mut r)?, U::read(&mut r)?))
     }
 }
 

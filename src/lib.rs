@@ -1,9 +1,12 @@
 pub mod proto;
 
 use std::{
-    io::{self, Read},
+    fmt::Debug,
+    io::{self},
     net::{TcpStream, ToSocketAddrs},
 };
+
+use crate::proto::CipherSuite;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -26,9 +29,9 @@ impl ClientSetupConnection {
             legacy_version: proto::LEGACY_VERSION,
             random: rand::random(),
             legacy_session_id: 0,
-            cipher_suites: [0; 2],
+            cipher_suites: vec![CipherSuite::TlsAes128GcmSha256].into(),
             legacy_compressions_methods: 0,
-            extensions: 0,
+            extensions: vec![].into(),
         };
         proto::write_handshake(&mut stream, handshake)?;
 
@@ -41,12 +44,12 @@ impl ClientSetupConnection {
 
 #[derive(Debug)]
 pub struct Error {
-    kind: ErrorKind,
+    pub kind: ErrorKind,
 }
 
 #[derive(Debug)]
 pub enum ErrorKind {
-    InvalidHandshake(u8),
+    InvalidHandshake(Box<dyn Debug>),
     Io(io::Error),
 }
 
