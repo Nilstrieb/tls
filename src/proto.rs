@@ -9,80 +9,6 @@ use byteorder::{BigEndian as B, ReadBytesExt, WriteBytesExt};
 use crate::ErrorKind;
 
 // https://datatracker.ietf.org/doc/html/rfc8446#section-4
-macro_rules! proto_enum {
-    ($(#[$meta:meta])* pub enum $name:ident: $discr_ty:ty {
-        $(
-            $KindName:ident $({
-                $(
-                    $field_name:ident : $field_ty:ty,
-                )*
-            })? = $discriminant:expr,
-        )*
-    }) => {
-        $(#[$meta])*
-        pub enum $name {
-            $(
-                $KindName $({
-                    $(
-                        $field_name: $field_ty,
-                    )*
-                })?,
-            )*
-        }
-
-        impl Value for $name {
-            fn write<W: Write>(&self, mut w: W) -> io::Result<()> {
-                mod discr_consts {
-                    $(
-                        #[allow(non_upper_case_globals)]
-                        pub(super) const $KindName: $discr_ty = $discriminant;
-                    )*
-                }
-
-                match self {
-                    $(
-                        Self::$KindName $( {
-                            $( $field_name, )*
-                        } )? => {
-                            Value::write(&discr_consts::$KindName, &mut w)?;
-                            $($(
-                                Value::write($field_name, &mut w)?;
-                            )*)?
-                            Ok(())
-                        }
-                    )*
-                }
-            }
-
-            fn read<R: Read>(mut r: R) -> crate::Result<Self> {
-                mod discr_consts {
-                    $(
-                        #[allow(non_upper_case_globals)]
-                        pub(super) const $KindName: $discr_ty = $discriminant;
-                    )*
-                }
-
-                let kind: $discr_ty = Value::read(&mut r)?;
-                match kind {
-                    $(
-                        discr_consts::$KindName => {
-                            $(let ( $( $field_name ),* ) = ($( { discard!($field_name); Value::read(&mut r)? } ),*);)?
-
-                            Ok(Self::$KindName $({
-                                $(
-                                    $field_name,
-                                )*
-                            })*)
-                        },
-                    )*
-
-                    _ => Err(ErrorKind::InvalidHandshake(Box::new(kind)).into()),
-                }
-            }
-        }
-    };
-}
-
 proto_enum! {
     #[derive(Debug, Clone)]
     pub enum Handshake: u8 {
@@ -158,6 +84,81 @@ proto_enum! {
     }
 }
 
+macro_rules! proto_enum {
+    ($(#[$meta:meta])* pub enum $name:ident: $discr_ty:ty {
+        $(
+            $KindName:ident $({
+                $(
+                    $field_name:ident : $field_ty:ty,
+                )*
+            })? = $discriminant:expr,
+        )*
+    }) => {
+        $(#[$meta])*
+        pub enum $name {
+            $(
+                $KindName $({
+                    $(
+                        $field_name: $field_ty,
+                    )*
+                })?,
+            )*
+        }
+
+        impl Value for $name {
+            fn write<W: Write>(&self, mut w: &mut W) -> io::Result<()> {
+                mod discr_consts {
+                    $(
+                        #[allow(non_upper_case_globals)]
+                        pub(super) const $KindName: $discr_ty = $discriminant;
+                    )*
+                }
+
+                match self {
+                    $(
+                        Self::$KindName $( {
+                            $( $field_name, )*
+                        } )? => {
+                            Value::write(&discr_consts::$KindName, &mut w)?;
+                            $($(
+                                Value::write($field_name, &mut w)?;
+                            )*)?
+                            Ok(())
+                        }
+                    )*
+                }
+            }
+
+            fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+                mod discr_consts {
+                    $(
+                        #[allow(non_upper_case_globals)]
+                        pub(super) const $KindName: $discr_ty = $discriminant;
+                    )*
+                }
+
+                let kind: $discr_ty = Value::read(r)?;
+                match kind {
+                    $(
+                        discr_consts::$KindName => {
+                            $(let ( $( $field_name ),* ) = ($( { discard!($field_name); Value::read(r)? } ),*);)?
+
+                            Ok(Self::$KindName $({
+                                $(
+                                    $field_name,
+                                )*
+                            })*)
+                        },
+                    )*
+
+                    _ => Err(ErrorKind::InvalidHandshake(Box::new(kind)).into()),
+                }
+            }
+        }
+    };
+}
+use proto_enum;
+
 #[derive(Clone)]
 pub struct List<T, Len>(Vec<T>, PhantomData<Len>);
 
@@ -174,15 +175,15 @@ impl<T: Debug, Len> Debug for List<T, Len> {
 }
 
 impl<T: Value, Len: Value + Into<usize> + TryFrom<usize>> Value for List<T, Len> {
-    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
-        let len: usize = Len::read(&mut r)?.into();
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+        let len: usize = Len::read(r)?.into();
         let mut v = Vec::with_capacity(len.max(1000));
         for _ in 0..len {
-            v.push(T::read(&mut r)?);
+            v.push(T::read(r)?);
         }
         Ok(Self(v, PhantomData))
     }
-    fn write<W: io::Write>(&self, w: W) -> io::Result<()> {
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         Len::write(
             &self
                 .0
@@ -203,19 +204,19 @@ pub fn read_handshake<R: Read>(r: &mut R) -> crate::Result<Handshake> {
 }
 
 pub trait Value: Sized + std::fmt::Debug {
-    fn write<W: io::Write>(&self, w: W) -> io::Result<()>;
-    fn read<R: io::Read>(r: R) -> crate::Result<Self>;
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()>;
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self>;
 }
 
 impl<V: Value, const N: usize> Value for [V; N] {
-    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
-        self.iter().map(|v| Value::write(v, &mut w)).collect()
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.iter().try_for_each(|v| Value::write(v, w))
     }
-    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
         // ugly :(
         let mut values = Vec::with_capacity(N);
         for _ in 0..N {
-            let value = V::read(&mut r)?;
+            let value = V::read(r)?;
             values.push(value);
         }
         Ok(values.try_into().unwrap())
@@ -223,32 +224,32 @@ impl<V: Value, const N: usize> Value for [V; N] {
 }
 
 impl Value for u8 {
-    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_u8(*self)
     }
-    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
         r.read_u8().map_err(Into::into)
     }
 }
 
 impl Value for u16 {
-    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_u16::<B>(*self)
     }
-    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
         r.read_u16::<B>().map_err(Into::into)
     }
 }
 
 impl<T: Value, U: Value> Value for (T, U) {
-    fn write<W: io::Write>(&self, mut w: W) -> io::Result<()> {
-        T::write(&self.0, &mut w)?;
-        T::write(&self.0, &mut w)?;
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        T::write(&self.0, w)?;
+        T::write(&self.0, w)?;
         Ok(())
     }
 
-    fn read<R: io::Read>(mut r: R) -> crate::Result<Self> {
-        Ok((T::read(&mut r)?, U::read(&mut r)?))
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+        Ok((T::read(r)?, U::read(r)?))
     }
 }
 
