@@ -15,7 +15,9 @@ pub enum TLSPlaintext {
         fragment: List<u8, u16>,
     },
     ChangeCipherSpec,
-    Alert,
+    Alert {
+        alert: Alert,
+    },
     Handshake {
         handshake: Handshake,
     },
@@ -23,6 +25,12 @@ pub enum TLSPlaintext {
 }
 
 impl TLSPlaintext {
+    const INVALID: u8 = 0;
+    const CHANGE_CIPHER_SPEC: u8 = 20;
+    const ALERT: u8 = 21;
+    const HANDSHAKE: u8 = 22;
+    const APPLICATION_DATA: u8 = 23;
+
     pub fn write(&self, w: &mut impl Write) -> io::Result<()> {
         match self {
             TLSPlaintext::Invalid {
@@ -30,9 +38,9 @@ impl TLSPlaintext {
                 fragment,
             } => todo!(),
             TLSPlaintext::ChangeCipherSpec => todo!(),
-            TLSPlaintext::Alert => todo!(),
+            TLSPlaintext::Alert { alert } => todo!(),
             TLSPlaintext::Handshake { handshake } => {
-                22u8.write(w)?; // handshake
+                Self::HANDSHAKE.write(w)?; // handshake
                 LEGACY_VERSION.write(w)?;
                 let len: u16 = handshake.byte_size().try_into().unwrap();
                 len.write(w)?;
@@ -40,6 +48,28 @@ impl TLSPlaintext {
                 Ok(())
             }
             TLSPlaintext::ApplicationData => todo!(),
+        }
+    }
+
+    pub fn read(r: &mut impl Read) -> crate::Result<Self> {
+        let discr = u8::read(r)?;
+        let _legacy_version = ProtocolVersion::read(r)?;
+        let _len = u16::read(r)?;
+        match discr {
+            Self::INVALID => todo!(),
+            Self::CHANGE_CIPHER_SPEC => todo!(),
+            Self::ALERT => {
+                let alert = Alert::read(r)?;
+                Ok(Self::Alert { alert })
+            }
+            Self::HANDSHAKE => todo!(),
+            Self::APPLICATION_DATA => todo!(),
+            _ => {
+                return Err(crate::ErrorKind::InvalidFrame(Box::new(format!(
+                    "Invalid record discriminant: {discr}"
+                )))
+                .into())
+            }
         }
     }
 }
@@ -134,6 +164,55 @@ proto_enum! {
     }
 }
 
+proto_struct! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct Alert {
+        level: AlertLevel,
+        description: AlertDescription,
+    }
+}
+
+proto_enum! {
+    #[derive(Debug, Clone, Copy)]
+    pub enum AlertLevel: u8 {
+        Warning = 1,
+        Fatal = 2,
+    }
+}
+
+proto_enum! {
+    #[derive(Debug, Clone, Copy)]
+    pub enum AlertDescription: u8 {
+        CloseNotify = 0,
+        UnexpectedMessage = 10,
+        BadRecordMac = 20,
+        RecordOverflow = 22,
+        HandshakeFailure = 40,
+        BadCertificate = 42,
+        UnsupportedCertificate = 43,
+        CertificateRevoked = 44,
+        CertificateExpired = 45,
+        CertificateUnknown = 46,
+        IllegalParameter = 47,
+        UnknownCa = 48,
+        AccessDenied = 49,
+        DecodeError = 50,
+        DecryptError = 51,
+        ProtocolVersion = 70,
+        InsufficientSecurity = 71,
+        InternalError = 80,
+        InappropriateFallback = 86,
+        UserCanceled = 90,
+        MissingExtension = 109,
+        UnsupportedExtension = 110,
+        UnrecognizedName = 112,
+        BadCertificateStatusResponse = 113,
+        UnknownPskIdentity = 115,
+        CertificateRequired = 116,
+        NoApplicationProtocol = 120,
+    }
+}
+
 macro_rules! proto_struct {
     {$(#[$meta:meta])* pub struct $name:ident {
         $(
@@ -164,6 +243,10 @@ macro_rules! proto_struct {
                         $field_name,
                     )*
                 })
+            }
+
+            fn byte_size(&self) -> usize {
+                $( self.$field_name.byte_size() + )* 0
             }
         }
     };
@@ -238,7 +321,7 @@ macro_rules! proto_enum {
                         },
                     )*
 
-                    _ => Err(ErrorKind::InvalidHandshake(Box::new(kind)).into()),
+                    _ => Err(ErrorKind::InvalidFrame(Box::new(kind)).into()),
                 }
             }
 

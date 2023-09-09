@@ -40,6 +40,9 @@ impl ClientSetupConnection {
         plaintext.write(&mut stream)?;
         stream.flush()?;
 
+        let out = proto::TLSPlaintext::read(stream.get_mut())?;
+        dbg!(out);
+
         // let res: proto::TLSPlaintext = proto::Value::read(&mut stream.get_mut())?;
         // dbg!(res);
 
@@ -54,7 +57,7 @@ pub struct Error {
 
 #[derive(Debug)]
 pub enum ErrorKind {
-    InvalidHandshake(Box<dyn Debug>),
+    InvalidFrame(Box<dyn Debug>),
     Io(io::Error),
 }
 

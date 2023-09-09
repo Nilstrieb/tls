@@ -15,9 +15,6 @@
           llvmPackages_16.bintools
           llvmPackages_16.libllvm
           rustup
-          pkg-config
-          sqlite
-          # openssl Explicitly no openssl!
         ];
         # https://github.com/rust-lang/rust-bindgen#environment-variables
         LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
@@ -37,6 +34,7 @@
             ''-I${pkgs.glib.out}/lib/glib-2.0/include/''
           ];
         packages = (with pkgs; [
+          wireshark
         ]);
       };
     });
