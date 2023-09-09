@@ -71,7 +71,10 @@ impl TLSPlaintext {
                 let alert = Alert::read(r)?;
                 Ok(Self::Alert { alert })
             }
-            Self::HANDSHAKE => todo!(),
+            Self::HANDSHAKE => {
+                let handshake = Handshake::read(r)?;
+                Ok(TLSPlaintext::Handshake { handshake })
+            }
             Self::APPLICATION_DATA => todo!(),
             _ => {
                 return Err(crate::ErrorKind::InvalidFrame(Box::new(format!(
@@ -142,7 +145,12 @@ proto_enum! {
         } = 0,
         MaxFragmentLength = 1,
         StatusRequest = 5,
-        SupportedGroups = 10,
+        SupportedGroups {
+            groups: NamedGroupList,
+        } = 10,
+        ECPointFormat {
+            formats: ECPointFormatList,
+        } = 11,
         SignatureAlgorithms = 13,
         UseSrtp = 14,
         Heartbeat = 15,
@@ -187,6 +195,34 @@ proto_enum! {
 
 type HostName = List<u8, u16>;
 type ServerNameList = List<ServerName, u16>;
+
+proto_enum! {
+    #[derive(Debug, Clone)]
+    pub enum ECPointFormat: u8 {
+        Uncompressed = 0,
+    }
+}
+type ECPointFormatList = List<ECPointFormat, u8>;
+
+proto_enum! {
+    #[derive(Debug, Clone)]
+    pub enum NamedGroup: u16 {
+        /* Elliptic Curve Groups (ECDHE) */
+        Secp256r1 = 0x0017,
+        Secp384r1 = 0x0018,
+        Secp521r1 = 0x0019,
+        X25519 = 0x001D,
+        X448 = 0x001E,
+
+        /* Finite Field Groups (DHE) */
+        Ffdhe2048 = 0x0100,
+        Ffdhe3072 = 0x0101,
+        Ffdhe4096 = 0x0102,
+        Ffdhe6144 = 0x0103,
+        Ffdhe8192 = 0x0104,
+    }
+}
+type NamedGroupList = List<NamedGroup, u16>;
 
 proto_struct! {
     #[derive(Debug, Clone, Copy)]
@@ -489,6 +525,20 @@ impl Value for u16 {
     }
     fn byte_size(&self) -> usize {
         2
+    }
+}
+
+impl Value for u32 {
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_u32::<B>(*self)
+    }
+
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+        r.read_u32::<B>().map_err(Into::into)
+    }
+
+    fn byte_size(&self) -> usize {
+        4
     }
 }
 

@@ -36,6 +36,14 @@ impl ClientSetupConnection {
                     }]
                     .into(),
                 },
+                proto::ExtensionCH::ECPointFormat {
+                    formats: vec![proto::ECPointFormat::Uncompressed].into(),
+                },
+                proto::ExtensionCH::SupportedGroups {
+                    groups: vec![
+                        proto::NamedGroup::X25519,
+                    ].into(),
+                },
                 proto::ExtensionCH::SupportedVersions {
                     versions: vec![proto::TLSV13].into(),
                 },
