@@ -11,8 +11,8 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct ClientConnection {}
 
 impl ClientConnection {
-    pub fn establish(host: impl ToSocketAddrs) -> Result<Self> {
-        let _setup = ClientSetupConnection::establish(host)?;
+    pub fn establish(host: &str, port: u16) -> Result<Self> {
+        let _setup = ClientSetupConnection::establish(host, port)?;
 
         todo!()
     }
@@ -21,22 +21,28 @@ impl ClientConnection {
 struct ClientSetupConnection {}
 
 impl ClientSetupConnection {
-    fn establish(host: impl ToSocketAddrs) -> Result<Self> {
-        let mut stream = BufWriter::new(LoggingWriter(TcpStream::connect(host)?));
+    fn establish(host: &str, port: u16) -> Result<Self> {
+        let mut stream = BufWriter::new(LoggingWriter(TcpStream::connect((host, port))?));
         let handshake = proto::Handshake::ClientHello {
-            legacy_version: proto::LEGACY_VERSION,
+            legacy_version: proto::LEGACY_TLSV12,
             random: rand::random(),
-            legacy_session_id: 0,
+            legacy_session_id: [(); 32].map(|()| rand::random()).to_vec().into(),
             cipher_suites: vec![proto::CipherSuite::TlsAes128GcmSha256].into(),
-            legacy_compressions_methods: 0,
-            extensions: vec![proto::ExtensionCH::SupportedVersions {
-                versions: vec![proto::TLSV3].into(),
-            }]
+            legacy_compressions_methods: vec![0].into(),
+            extensions: vec![
+                proto::ExtensionCH::ServerName {
+                    server_name: vec![proto::ServerName::HostName {
+                        host_name: host.as_bytes().to_vec().into(),
+                    }]
+                    .into(),
+                },
+                proto::ExtensionCH::SupportedVersions {
+                    versions: vec![proto::TLSV13].into(),
+                },
+            ]
             .into(),
         };
-        let plaintext = proto::TLSPlaintext::Handshake {
-            handshake,
-        };
+        let plaintext = proto::TLSPlaintext::Handshake { handshake };
         plaintext.write(&mut stream)?;
         stream.flush()?;
 
@@ -82,7 +88,7 @@ impl<W: io::Write> io::Write for LoggingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let len = self.0.write(buf);
         if let Ok(len) = len {
-            eprintln!("wrote bytes: {:x?}", &buf[..len]);
+            eprintln!(" bytes: {:02x?}", &buf[..len]);
         }
         len
     }
@@ -96,7 +102,7 @@ impl<R: Read> io::Read for LoggingWriter<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let len = self.0.read(buf);
         if let Ok(len) = len {
-            eprintln!("read bytes: {:x?}", &buf[..len]);
+            eprintln!("read bytes: {:02x?}", &buf[..len]);
         }
         len
     }
