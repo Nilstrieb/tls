@@ -7,7 +7,7 @@ use std::{
 
 use crate::ErrorKind;
 
-use self::ser_de::{proto_enum, proto_struct, u24, List, Todo, Value};
+use self::ser_de::{proto_enum, proto_struct, u24, FrameReader, List, Todo, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TLSPlaintext {
@@ -58,6 +58,7 @@ impl TLSPlaintext {
     }
 
     pub fn read(r: &mut impl Read) -> crate::Result<Self> {
+        let r = &mut FrameReader::new(r);
         let discr = u8::read(r)?;
         let _legacy_version = ProtocolVersion::read(r)?;
         let _len = u16::read(r)?;
@@ -101,7 +102,7 @@ proto_enum! {
         } = 1,
         ServerHello {
             legacy_version: ProtocolVersion,
-            random: Random,
+            random: ServerHelloRandom,
             legacy_session_id_echo: LegacySessionId,
             cipher_suite: CipherSuite,
             legacy_compression_method: u8,
@@ -190,7 +191,7 @@ proto_enum! {
         } = 43,
         Cookie { todo: Todo, } = 44,
         KeyShare {
-            group: NamedGroup,
+            key_share: ServerHelloKeyshare,
         } = 51,
     }
 }
@@ -329,9 +330,60 @@ proto_enum! {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerHelloRandom(Random);
+
+impl Value for ServerHelloRandom {
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.0.write(w)
+    }
+
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
+        let random = Random::read(r)?;
+        if random == HELLO_RETRY_REQUEST {
+            r.is_hello_retry_request = true;
+        }
+        Ok(Self(random))
+    }
+
+    fn byte_size(&self) -> usize {
+        self.0.byte_size()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerHelloKeyshare {
+    HelloRetryRequest(NamedGroup),
+    ServerHello(KeyShareEntry),
+}
+
+impl Value for ServerHelloKeyshare {
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        match self {
+            Self::HelloRetryRequest(group) => group.write(w),
+            Self::ServerHello(entry) => entry.write(w),
+        }
+    }
+
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
+        if r.is_hello_retry_request {
+            NamedGroup::read(r).map(Self::HelloRetryRequest)
+        } else {
+            KeyShareEntry::read(r).map(Self::ServerHello)
+        }
+    }
+
+    fn byte_size(&self) -> usize {
+        match self {
+            Self::HelloRetryRequest(group) => group.byte_size(),
+            Self::ServerHello(entry) => entry.byte_size(),
+        }
+    }
+}
+
 impl Handshake {
     pub fn is_hello_retry_request(&self) -> bool {
-        matches!(self, Handshake::ServerHello { random, .. } if random == &HELLO_RETRY_REQUEST)
+        matches!(self, Handshake::ServerHello { random, .. } if random.0 == HELLO_RETRY_REQUEST)
     }
 }
 

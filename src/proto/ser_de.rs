@@ -4,7 +4,33 @@ use std::{
     io::{self, Read, Write},
     marker::PhantomData,
     num::TryFromIntError,
+    ops::{Deref, DerefMut},
 };
+
+pub struct FrameReader<R> {
+    read: R,
+    pub is_hello_retry_request: bool,
+}
+
+impl<R> FrameReader<R> {
+    pub fn new(read: R) -> Self {
+        FrameReader { read, is_hello_retry_request: false }
+    }
+}
+
+impl<R> Deref for FrameReader<R> {
+    type Target = R;
+
+    fn deref(&self) -> &Self::Target {
+        &self.read
+    }
+}
+
+impl<R> DerefMut for FrameReader<R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.read
+    }
+}
 
 /// ```ignore
 /// proto_struct! {}
@@ -31,7 +57,7 @@ macro_rules! proto_struct {
                 Ok(())
             }
 
-            fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+            fn read<R: Read>(r: &mut $crate::proto::ser_de::FrameReader<R>) -> crate::Result<Self> {
                 let ( $( $field_name ),* ) = ($( { crate::proto::ser_de::discard!($field_name); crate::proto::ser_de::Value::read(r)? } ),*);
 
                 Ok(Self {
@@ -120,7 +146,7 @@ macro_rules! proto_enum {
                 }
             }
 
-            fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+            fn read<R: Read>(r: &mut $crate::proto::ser_de::FrameReader<R>) -> crate::Result<Self> {
                 mod discr_consts {
                     #[allow(unused_imports)]
                     use super::*;
@@ -140,8 +166,9 @@ macro_rules! proto_enum {
                 match kind {
                     $(
                         discr_consts::$KindName => {
-                            #[allow(unused_parens)]
-                            $(let ( $( $field_name ),* ) = ($( { crate::proto::ser_de::discard!($field_name); crate::proto::ser_de::Value::read(r)? } ),*);)?
+                            $($(
+                                let $field_name = crate::proto::ser_de::Value::read(r)?;
+                            )*)?
 
                             Ok(Self::$KindName $({
                                 $(
@@ -186,7 +213,7 @@ impl Value for Todo {
         todo!()
     }
 
-    fn read<R: Read>(_: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(_: &mut FrameReader<R>) -> crate::Result<Self> {
         todo!()
     }
 
@@ -211,11 +238,13 @@ impl<T: Debug, Len> Debug for List<T, Len> {
 }
 
 impl<T: Value, Len: Value + Into<usize> + TryFrom<usize> + Default> Value for List<T, Len> {
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
+        eprintln!("reading a list");
         let mut remaining_byte_size = Len::read(r)?.into();
         let mut v = Vec::new();
-
+        eprintln!("list.. remaining bytes {remaining_byte_size}");
         while remaining_byte_size > 0 {
+            eprintln!("things {remaining_byte_size} {v:?}");
             let value = T::read(r)?;
             remaining_byte_size -= value.byte_size();
             v.push(value);
@@ -242,7 +271,7 @@ impl<T: Value, Len: Value + Into<usize> + TryFrom<usize> + Default> Value for Li
 
 pub trait Value: Sized + std::fmt::Debug {
     fn write<W: Write>(&self, w: &mut W) -> io::Result<()>;
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self>;
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self>;
     fn byte_size(&self) -> usize;
 }
 
@@ -250,7 +279,7 @@ impl<V: Value, const N: usize> Value for [V; N] {
     fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         self.iter().try_for_each(|v| Value::write(v, w))
     }
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
         // ugly :(
         let mut values = Vec::with_capacity(N);
         for _ in 0..N {
@@ -268,7 +297,7 @@ impl Value for u8 {
     fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_u8(*self)
     }
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
         r.read_u8().map_err(Into::into)
     }
     fn byte_size(&self) -> usize {
@@ -280,7 +309,7 @@ impl Value for u16 {
     fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_u16::<B>(*self)
     }
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
         r.read_u16::<B>().map_err(Into::into)
     }
     fn byte_size(&self) -> usize {
@@ -293,7 +322,7 @@ impl Value for u32 {
         w.write_u32::<B>(*self)
     }
 
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
         r.read_u32::<B>().map_err(Into::into)
     }
 
@@ -309,7 +338,7 @@ impl<T: Value, U: Value> Value for (T, U) {
         Ok(())
     }
 
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
         Ok((T::read(r)?, U::read(r)?))
     }
 
@@ -327,7 +356,7 @@ impl Value for u24 {
         w.write_u24::<B>(self.0)
     }
 
-    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+    fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
         r.read_u24::<B>().map_err(Into::into).map(u24)
     }
 

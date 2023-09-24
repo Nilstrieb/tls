@@ -18,7 +18,7 @@ fn parse_hello_retry_request() {
         TLSPlaintext::Handshake {
             handshake: Handshake::ServerHello {
                 legacy_version: LEGACY_TLSV12,
-                random: HELLO_RETRY_REQUEST,
+                random: ServerHelloRandom(HELLO_RETRY_REQUEST),
                 legacy_session_id_echo:
                     b"\xdd\x0f\x25\x0a\xf0\xa6\xd9\xb0\x1c\x28\x2f\x55\xcb\xab\x07\x94\
                     \x2e\xb3\x98\x96\x32\x81\xad\x8d\x24\x72\x52\x2a\x45\x26\x10\xa2"
@@ -31,8 +31,56 @@ fn parse_hello_retry_request() {
                         selected_version: TLSV13
                     },
                     ExtensionSH::KeyShare {
-                        group: NamedGroup::X25519
+                        key_share: ServerHelloKeyshare::HelloRetryRequest(NamedGroup::X25519)
                     }
+                ]
+                .into()
+            }
+        }
+    );
+}
+
+#[test]
+fn parse_server_hello() {
+    let mut bytes: &[u8] = b"\x16\x03\x03\x00\x7a\x02\x00\x00\x76\x03\x03\x15\x2a\x7b\x01\xaa\
+    \x65\xde\x1f\xe0\x87\x52\x73\xd6\x7d\xd4\x8c\xc8\xf1\x9d\x55\x09\
+    \x4c\xbd\xa2\xb0\xc9\x77\xa2\x4b\x81\xed\x63\x20\x05\xc1\x7d\x07\
+    \x34\x68\xaf\xd5\xfc\x7f\x1c\x0c\x07\xd7\x14\x9e\x2b\x66\x87\x44\
+    \x02\xbb\xf7\xb7\x1d\x6a\x29\xaf\x93\xaf\xe2\x02\x13\x01\x00\x00\
+    \x2e\x00\x33\x00\x24\x00\x1d\x00\x20\x8e\xbc\x32\x53\xd7\x4d\xf9\
+    \x4a\xb8\x04\x03\xda\xfe\xbf\xf5\xab\x6f\x8f\x65\x2a\x1d\x70\xde\
+    \xe7\xaf\x93\x82\x59\x70\xac\x75\x4d\x00\x2b\x00\x02\x03\x04";
+
+    let handshake = TLSPlaintext::read(&mut bytes).unwrap();
+
+    assert_eq!(
+        handshake,
+        TLSPlaintext::Handshake {
+            handshake: Handshake::ServerHello {
+                legacy_version: LEGACY_TLSV12,
+                random: ServerHelloRandom(
+                    *b"\x15\x2a\x7b\x01\xaa\x65\xde\x1f\xe0\x87\x52\x73\xd6\x7d\xd4\x8c\
+                    \xc8\xf1\x9d\x55\x09\x4c\xbd\xa2\xb0\xc9\x77\xa2\x4b\x81\xed\x63"
+                ),
+                legacy_session_id_echo:
+                    b"\x05\xc1\x7d\x07\x34\x68\xaf\xd5\xfc\x7f\x1c\x0c\x07\xd7\x14\x9e\
+                    \x2b\x66\x87\x44\x02\xbb\xf7\xb7\x1d\x6a\x29\xaf\x93\xaf\xe2\x02"
+                        .to_vec()
+                        .into(),
+                cipher_suite: CipherSuite::TlsAes128GcmSha256,
+                legacy_compression_method: 0,
+                extensions: vec![
+                    ExtensionSH::KeyShare {
+                        key_share: ServerHelloKeyshare::ServerHello(KeyShareEntry::X25519 {
+                            len: 32,
+                            key_exchange:
+                                *b"\x8e\xbc\x32\x53\xd7\x4d\xf9\x4a\xb8\x04\x03\xda\xfe\xbf\xf5\xab\
+                                \x6f\x8f\x65\x2a\x1d\x70\xde\xe7\xaf\x93\x82\x59\x70\xac\x75\x4d"
+                        })
+                    },
+                    ExtensionSH::SupportedVersions {
+                        selected_version: TLSV13
+                    },
                 ]
                 .into()
             }

@@ -49,16 +49,16 @@ impl ClientSetupConnection {
                     groups: vec![proto::NamedGroup::X25519].into(),
                 },
                 // passing this doesnt work and shows up as TLSv1.2 in wireshark and gives a handshake error
-                /*proto::ExtensionCH::KeyShare {
+                proto::ExtensionCH::KeyShare {
                     entries: vec![proto::KeyShareEntry::X25519 {
                         len: public.as_bytes().len().try_into().unwrap(),
                         key_exchange: *public.as_bytes(),
                     }]
                     .into(),
-                },*/
-                /*proto::ExtensionCH::SignatureAlgorithms {
+                },
+                proto::ExtensionCH::SignatureAlgorithms {
                     supported_signature_algorithms: vec![proto::SignatureScheme::ED25519].into(),
-                },*/
+                },
                 proto::ExtensionCH::SupportedVersions {
                     versions: vec![proto::TLSV13].into(),
                 },
@@ -97,6 +97,7 @@ pub enum ErrorKind {
 
 impl From<io::Error> for Error {
     fn from(value: io::Error) -> Self {
+        panic!("error: {value}");
         Self {
             kind: ErrorKind::Io(value),
         }
@@ -105,6 +106,7 @@ impl From<io::Error> for Error {
 
 impl From<ErrorKind> for Error {
     fn from(value: ErrorKind) -> Self {
+        panic!("error:{value:?}");
         Self { kind: value }
     }
 }
