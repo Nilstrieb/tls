@@ -3,8 +3,10 @@ pub mod proto;
 use std::{
     fmt::Debug,
     io::{self, BufWriter, Read, Write},
-    net::{TcpStream, ToSocketAddrs},
+    net::TcpStream,
 };
+
+use crate::proto::TLSPlaintext;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -54,7 +56,12 @@ impl ClientSetupConnection {
 
         println!("hello!");
         let out = proto::TLSPlaintext::read(stream.get_mut())?;
-        dbg!(out);
+        dbg!(&out);
+
+        if matches!(out, TLSPlaintext::Handshake { handshake } if handshake.is_hello_retry_request())
+        {
+            println!("hello retry request, the server doesnt like us :(");
+        }
 
         // let res: proto::TLSPlaintext = proto::Value::read(&mut stream.get_mut())?;
         // dbg!(res);
@@ -76,7 +83,6 @@ pub enum ErrorKind {
 
 impl From<io::Error> for Error {
     fn from(value: io::Error) -> Self {
-        panic!("io error: {value}");
         Self {
             kind: ErrorKind::Io(value),
         }
@@ -85,7 +91,6 @@ impl From<io::Error> for Error {
 
 impl From<ErrorKind> for Error {
     fn from(value: ErrorKind) -> Self {
-        panic!("error: {value:?}");
         Self { kind: value }
     }
 }
