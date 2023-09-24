@@ -1,16 +1,24 @@
 use byteorder::{BigEndian as B, ReadBytesExt, WriteBytesExt};
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    io::{self, Read, Write},
+    marker::PhantomData,
+    num::TryFromIntError,
+};
 
+/// ```ignore
+/// proto_struct! {}
+/// ```
 macro_rules! proto_struct {
     {$(#[$meta:meta])* pub struct $name:ident {
         $(
-            $field_name:ident : $field_ty:ty,
+            pub $field_name:ident : $field_ty:ty,
         )*
     }} => {
         $(#[$meta])*
         pub struct $name {
             $(
-                $field_name: $field_ty,
+                pub $field_name: $field_ty,
             )*
         }
 
@@ -39,14 +47,12 @@ macro_rules! proto_struct {
         }
     };
 }
-use std::{
-    io::{self, Read, Write},
-    marker::PhantomData,
-    num::TryFromIntError,
-};
 
 pub(crate) use proto_struct;
 
+/// ```ignore
+/// proto_enum! {}
+/// ```
 macro_rules! proto_enum {
     {$(#[$meta:meta])* pub enum $name:ident: $discr_ty:ty $( ,(length: $len_ty:ty) )? {
         $(
@@ -116,13 +122,16 @@ macro_rules! proto_enum {
 
             fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
                 mod discr_consts {
+                    #[allow(unused_imports)]
+                    use super::*;
+                    pub type Type = $discr_ty;
                     $(
                         #[allow(non_upper_case_globals)]
                         pub(super) const $KindName: $discr_ty = $discriminant;
                     )*
                 }
 
-                let kind: $discr_ty = crate::proto::ser_de::Value::read(r)?;
+                let kind: discr_consts::Type = crate::proto::ser_de::Value::read(r)?;
 
                 $(
                     let _len = <$len_ty>::read(r)?;

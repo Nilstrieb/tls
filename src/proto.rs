@@ -1,4 +1,4 @@
-mod ser_de;
+pub mod ser_de;
 
 use std::{
     fmt::Debug,
@@ -155,25 +155,29 @@ proto_enum! {
         ECPointFormat {
             formats: ECPointFormatList,
         } = 11,
-        SignatureAlgorithms{ todo: Todo, } = 13,
-        UseSrtp{ todo: Todo, } = 14,
-        Heartbeat { todo: Todo, }= 15,
-        ApplicationLayerProtocolNegotiation{ todo: Todo, } = 16,
-        SignedCertificateTimestamp{ todo: Todo, } = 18,
-        ClientCertificateType{ todo: Todo, } = 19,
-        ServerCertificateType { todo: Todo, }= 20,
-        Padding{ todo: Todo, } = 21,
-        PreSharedKey { todo: Todo, }= 41,
-        EarlyData{ todo: Todo, } = 42,
+        SignatureAlgorithms {
+            supported_signature_algorithms: List<SignatureScheme, u16>,
+        } = 13,
+        UseSrtp { todo: Todo, } = 14,
+        Heartbeat { todo: Todo, } = 15,
+        ApplicationLayerProtocolNegotiation { todo: Todo, } = 16,
+        SignedCertificateTimestamp { todo: Todo, } = 18,
+        ClientCertificateType { todo: Todo, } = 19,
+        ServerCertificateType { todo: Todo, } = 20,
+        Padding { todo: Todo, } = 21,
+        PreSharedKey { todo: Todo, } = 41,
+        EarlyData { todo: Todo, } = 42,
         SupportedVersions {
             versions: List<ProtocolVersion, u8>,
         } = 43,
         Cookie{ todo: Todo, } = 44,
-        PskKeyExchangeModes { todo: Todo, }= 45,
-        CertificateAuthorities { todo: Todo, }= 47,
-        PostHandshakeAuth { todo: Todo, }= 49,
+        PskKeyExchangeModes { todo: Todo, } = 45,
+        CertificateAuthorities { todo: Todo, } = 47,
+        PostHandshakeAuth { todo: Todo, } = 49,
         SignatureAlgorithmsCert{ todo: Todo, } = 50,
-        KeyShare { todo: Todo, }= 51,
+        KeyShare {
+            entries: List<KeyShareEntry, u16>,
+        } = 51,
     }
 }
 
@@ -213,29 +217,74 @@ type ECPointFormatList = List<ECPointFormat, u8>;
 
 proto_enum! {
     #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum KeyShareEntry: super::NamedGroup {
+        X25519 {
+            len: u16,
+            key_exchange: [u8; 32],
+        } = super::NamedGroup::X25519,
+    }
+}
+
+proto_enum! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[allow(non_camel_case_types)]
     pub enum NamedGroup: u16 {
         /* Elliptic Curve Groups (ECDHE) */
-        Secp256r1 = 0x0017,
-        Secp384r1 = 0x0018,
-        Secp521r1 = 0x0019,
+        SECP256R1 = 0x0017,
+        SECP384R1 = 0x0018,
+        SECP521R1 = 0x0019,
         X25519 = 0x001D,
         X448 = 0x001E,
 
         /* Finite Field Groups (DHE) */
-        Ffdhe2048 = 0x0100,
-        Ffdhe3072 = 0x0101,
-        Ffdhe4096 = 0x0102,
-        Ffdhe6144 = 0x0103,
-        Ffdhe8192 = 0x0104,
+        FFDHE2048 = 0x0100,
+        FFDHE3072 = 0x0101,
+        FFDHE4096 = 0x0102,
+        FFDHE6144 = 0x0103,
+        FFDHE8192 = 0x0104,
     }
 }
 type NamedGroupList = List<NamedGroup, u16>;
 
+proto_enum! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[allow(non_camel_case_types)]
+    pub enum SignatureScheme: u32 {
+        /* RSASSA-PKCS1-v1_5 algorithms */
+        RSA_PKCS1_SHA256 = 0x0401,
+        RSA_PKCS1_SHA384 = 0x0501,
+        RSA_PKCS1_SHA512 = 0x0601,
+
+        /* ECDSA algorithms */
+        ECDSA_SECP256R1_SHA256 = 0x0403,
+        ECDSA_SECP384R1_SHA384 = 0x0503,
+        ECDSA_SECP521R1_SHA512 = 0x0603,
+
+        /* RSASSA-PSS algorithms with public key OID rsaEncryption */
+        RSA_PSS_RSAE_SHA256 = 0x0804,
+        RSA_PSS_RSAE_SHA384 = 0x0805,
+        RSA_PSS_RSAE_SHA512 = 0x0806,
+
+        /* EdDSA algorithms */
+        ED25519 = 0x0807,
+        ED448 = 0x0808,
+
+        /* RSASSA-PSS algorithms with public key OID RSASSA-PSS */
+        RSA_PSS_PSS_SHA256 = 0x0809,
+        RSA_PSS_PSS_SHA384 = 0x080a,
+        RSA_PSS_PSS_SHA512 = 0x080b,
+
+        /* Legacy algorithms */
+        RSA_PKCS1_SHA1 = 0x0201,
+        ECDSA_SHA1 = 0x0203,
+    }
+}
+
 proto_struct! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Alert {
-        level: AlertLevel,
-        description: AlertDescription,
+        pub level: AlertLevel,
+        pub description: AlertDescription,
     }
 }
 

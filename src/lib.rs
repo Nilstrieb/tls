@@ -28,7 +28,7 @@ impl ClientSetupConnection {
         let handshake = proto::Handshake::ClientHello {
             legacy_version: proto::LEGACY_TLSV12,
             random: rand::random(),
-            legacy_session_id: [(); 32].map(|()| rand::random()).to_vec().into(),
+            legacy_session_id: rand::random::<[u8; 32]>().to_vec().into(),
             cipher_suites: vec![proto::CipherSuite::TlsAes128GcmSha256].into(),
             legacy_compressions_methods: vec![0].into(),
             extensions: vec![
@@ -44,6 +44,17 @@ impl ClientSetupConnection {
                 proto::ExtensionCH::SupportedGroups {
                     groups: vec![proto::NamedGroup::X25519].into(),
                 },
+                // passing this doesnt work and shows up as TLSv1.2 in wireshark and gives a handshake error
+                /*proto::ExtensionCH::KeyShare {
+                    entries: vec![proto::KeyShareEntry::X25519 {
+                        len: 32,
+                        key_exchange: rand::random(),
+                    }]
+                    .into(),
+                },
+                proto::ExtensionCH::SignatureAlgorithms {
+                    supported_signature_algorithms: vec![proto::SignatureScheme::ED25519].into(),
+                },*/
                 proto::ExtensionCH::SupportedVersions {
                     versions: vec![proto::TLSV13].into(),
                 },
@@ -54,7 +65,6 @@ impl ClientSetupConnection {
         plaintext.write(&mut stream)?;
         stream.flush()?;
 
-        println!("hello!");
         let out = proto::TLSPlaintext::read(stream.get_mut())?;
         dbg!(&out);
 
