@@ -133,12 +133,13 @@ type LegacySessionId = List<u8, u8>;
 
 proto_enum! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(non_camel_case_types)]
     pub enum CipherSuite: [u8; 2] {
-        TlsAes128GcmSha256 = [0x13, 0x01],
-        TlsAes256GcmSha384 = [0x13, 0x02],
-        TlsChacha20Poly1305Sha256 = [0x13, 0x03],
-        TlsAes128CcmSha256 = [0x13, 0x04],
-        TlsAes128Ccm8Sha256 = [0x13, 0x05],
+        TLS_AES_128_GCM_SHA256 = [0x13, 0x01],
+        TLS_AES_256_GCM_SHA384 = [0x13, 0x02],
+        TLS_CHACHA20_POLY1305_SHA256 = [0x13, 0x03],
+        TLS_AES_128_CCM_SHA256 = [0x13, 0x04],
+        TLS_AES_128_CCM_8_SHA256 = [0x13, 0x05],
     }
 }
 

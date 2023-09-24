@@ -24,7 +24,7 @@ fn parse_hello_retry_request() {
                     \x2e\xb3\x98\x96\x32\x81\xad\x8d\x24\x72\x52\x2a\x45\x26\x10\xa2"
                         .to_vec()
                         .into(),
-                cipher_suite: CipherSuite::TlsAes128GcmSha256,
+                cipher_suite: CipherSuite::TLS_AES_128_GCM_SHA256,
                 legacy_compression_method: 0,
                 extensions: vec![
                     ExtensionSH::SupportedVersions {
@@ -67,7 +67,7 @@ fn parse_server_hello() {
                     \x2b\x66\x87\x44\x02\xbb\xf7\xb7\x1d\x6a\x29\xaf\x93\xaf\xe2\x02"
                         .to_vec()
                         .into(),
-                cipher_suite: CipherSuite::TlsAes128GcmSha256,
+                cipher_suite: CipherSuite::TLS_AES_128_GCM_SHA256,
                 legacy_compression_method: 0,
                 extensions: vec![
                     ExtensionSH::KeyShare {

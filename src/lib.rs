@@ -33,7 +33,7 @@ impl ClientSetupConnection {
             legacy_version: proto::LEGACY_TLSV12,
             random: rand::random(),
             legacy_session_id: rand::random::<[u8; 32]>().to_vec().into(),
-            cipher_suites: vec![proto::CipherSuite::TlsAes128GcmSha256].into(),
+            cipher_suites: vec![proto::CipherSuite::TLS_AES_128_GCM_SHA256].into(),
             legacy_compressions_methods: vec![0].into(),
             extensions: vec![
                 proto::ExtensionCH::ServerName {
@@ -57,7 +57,20 @@ impl ClientSetupConnection {
                     .into(),
                 },
                 proto::ExtensionCH::SignatureAlgorithms {
-                    supported_signature_algorithms: vec![proto::SignatureScheme::ED25519].into(),
+                    supported_signature_algorithms: vec![
+                        proto::SignatureScheme::ED25519,
+                        proto::SignatureScheme::ED448,
+                        proto::SignatureScheme::ECDSA_SECP256R1_SHA256,
+                        proto::SignatureScheme::ECDSA_SECP384R1_SHA384,
+                        proto::SignatureScheme::ECDSA_SECP521R1_SHA512,
+                        proto::SignatureScheme::RSA_PSS_PSS_SHA256,
+                        proto::SignatureScheme::RSA_PSS_PSS_SHA384,
+                        proto::SignatureScheme::RSA_PSS_PSS_SHA512,
+                        proto::SignatureScheme::RSA_PSS_RSAE_SHA256,
+                        proto::SignatureScheme::RSA_PSS_RSAE_SHA384,
+                        proto::SignatureScheme::RSA_PSS_RSAE_SHA512,
+                    ]
+                    .into(),
                 },
                 proto::ExtensionCH::SupportedVersions {
                     versions: vec![proto::TLSV13].into(),

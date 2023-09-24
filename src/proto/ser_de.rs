@@ -14,7 +14,10 @@ pub struct FrameReader<R> {
 
 impl<R> FrameReader<R> {
     pub fn new(read: R) -> Self {
-        FrameReader { read, is_hello_retry_request: false }
+        FrameReader {
+            read,
+            is_hello_retry_request: false,
+        }
     }
 }
 
