@@ -40,9 +40,7 @@ impl ClientSetupConnection {
                     formats: vec![proto::ECPointFormat::Uncompressed].into(),
                 },
                 proto::ExtensionCH::SupportedGroups {
-                    groups: vec![
-                        proto::NamedGroup::X25519,
-                    ].into(),
+                    groups: vec![proto::NamedGroup::X25519].into(),
                 },
                 proto::ExtensionCH::SupportedVersions {
                     versions: vec![proto::TLSV13].into(),
@@ -54,6 +52,7 @@ impl ClientSetupConnection {
         plaintext.write(&mut stream)?;
         stream.flush()?;
 
+        println!("hello!");
         let out = proto::TLSPlaintext::read(stream.get_mut())?;
         dbg!(out);
 
@@ -77,6 +76,7 @@ pub enum ErrorKind {
 
 impl From<io::Error> for Error {
     fn from(value: io::Error) -> Self {
+        panic!("io error: {value}");
         Self {
             kind: ErrorKind::Io(value),
         }
@@ -85,6 +85,7 @@ impl From<io::Error> for Error {
 
 impl From<ErrorKind> for Error {
     fn from(value: ErrorKind) -> Self {
+        panic!("error: {value:?}");
         Self { kind: value }
     }
 }

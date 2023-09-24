@@ -14,6 +14,7 @@
           llvmPackages_16.clang
           llvmPackages_16.bintools
           llvmPackages_16.libllvm
+          llvmPackages_16.lldb
           rustup
         ];
         # https://github.com/rust-lang/rust-bindgen#environment-variables

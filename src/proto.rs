@@ -9,7 +9,7 @@ use byteorder::{BigEndian as B, ReadBytesExt, WriteBytesExt};
 
 use crate::ErrorKind;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TLSPlaintext {
     Invalid {
         legacy_version: ProtocolVersion,
@@ -34,12 +34,9 @@ impl TLSPlaintext {
 
     pub fn write(&self, w: &mut impl Write) -> io::Result<()> {
         match self {
-            TLSPlaintext::Invalid {
-                legacy_version,
-                fragment,
-            } => todo!(),
+            TLSPlaintext::Invalid { .. } => todo!(),
             TLSPlaintext::ChangeCipherSpec => todo!(),
-            TLSPlaintext::Alert { alert } => todo!(),
+            TLSPlaintext::Alert { .. } => todo!(),
             TLSPlaintext::Handshake { handshake } => {
                 Self::HANDSHAKE.write(w)?;
                 // MUST be set to 0x0303 for all records
@@ -91,13 +88,13 @@ pub type Random = [u8; 32];
 
 // https://datatracker.ietf.org/doc/html/rfc8446#section-4
 proto_enum! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Handshake: u8, (length: u24) {
         // https://datatracker.ietf.org/doc/html/rfc8446#section-4.1.2
         ClientHello {
             legacy_version: ProtocolVersion,
             random: Random,
-            legacy_session_id: List<u8, u8>,
+            legacy_session_id: LegacySessionId,
             cipher_suites: List<CipherSuite, u16>,
             legacy_compressions_methods: List<u8, u8>,
             extensions: List<ExtensionCH, u16>,
@@ -105,7 +102,7 @@ proto_enum! {
         ServerHello {
             legacy_version: ProtocolVersion,
             random: Random,
-            legacy_session_id_echo: u8,
+            legacy_session_id_echo: LegacySessionId,
             cipher_suite: CipherSuite,
             legacy_compression_method: u8,
             extensions: List<ExtensionSH, u16>,
@@ -122,12 +119,19 @@ proto_enum! {
     }
 }
 
+pub const HELLO_RETRY_REQUEST: [u8; 32] = [
+    0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11, 0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91,
+    0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E, 0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C,
+];
+
 pub const LEGACY_TLSV10: ProtocolVersion = 0x0301;
 pub const LEGACY_TLSV12: ProtocolVersion = 0x0303;
 pub const TLSV13: ProtocolVersion = 0x0304;
 
+type LegacySessionId = List<u8, u8>;
+
 proto_enum! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum CipherSuite: [u8; 2] {
         TlsAes128GcmSha256 = [0x13, 0x01],
         TlsAes256GcmSha384 = [0x13, 0x02],
@@ -138,54 +142,57 @@ proto_enum! {
 }
 
 proto_enum! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum ExtensionCH: u16, (length: u16) {
         ServerName {
             server_name: ServerNameList,
         } = 0,
-        MaxFragmentLength = 1,
-        StatusRequest = 5,
+        MaxFragmentLength { todo: Todo, } = 1,
+        StatusRequest { todo: Todo, } = 5,
         SupportedGroups {
             groups: NamedGroupList,
         } = 10,
         ECPointFormat {
             formats: ECPointFormatList,
         } = 11,
-        SignatureAlgorithms = 13,
-        UseSrtp = 14,
-        Heartbeat = 15,
-        ApplicationLayerProtocolNegotiation = 16,
-        SignedCertificateTimestamp = 18,
-        ClientCertificateType = 19,
-        ServerCertificateType = 20,
-        Padding = 21,
-        PreSharedKey = 41,
-        EarlyData = 42,
+        SignatureAlgorithms{ todo: Todo, } = 13,
+        UseSrtp{ todo: Todo, } = 14,
+        Heartbeat { todo: Todo, }= 15,
+        ApplicationLayerProtocolNegotiation{ todo: Todo, } = 16,
+        SignedCertificateTimestamp{ todo: Todo, } = 18,
+        ClientCertificateType{ todo: Todo, } = 19,
+        ServerCertificateType { todo: Todo, }= 20,
+        Padding{ todo: Todo, } = 21,
+        PreSharedKey { todo: Todo, }= 41,
+        EarlyData{ todo: Todo, } = 42,
         SupportedVersions {
             versions: List<ProtocolVersion, u8>,
         } = 43,
-        Cookie = 44,
-        PskKeyExchangeModes = 45,
-        CertificateAuthorities = 47,
-        PostHandshakeAuth = 49,
-        SignatureAlgorithmsCert = 50,
-        KeyShare = 51,
+        Cookie{ todo: Todo, } = 44,
+        PskKeyExchangeModes { todo: Todo, }= 45,
+        CertificateAuthorities { todo: Todo, }= 47,
+        PostHandshakeAuth { todo: Todo, }= 49,
+        SignatureAlgorithmsCert{ todo: Todo, } = 50,
+        KeyShare { todo: Todo, }= 51,
     }
 }
 
 proto_enum! {
-    #[derive(Debug, Clone, Copy)]
-    pub enum ExtensionSH: u16 {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum ExtensionSH: u16, (length: u16) {
         PreSharedKey = 41,
         SupportedVersions {
             selected_version: ProtocolVersion,
         } = 43,
-        KeyShare = 51,
+        Cookie { todo: Todo, } = 44,
+        KeyShare {
+            group: NamedGroup,
+        } = 51,
     }
 }
 
 proto_enum! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum ServerName: u8 {
         HostName {
             host_name: HostName,
@@ -197,7 +204,7 @@ type HostName = List<u8, u16>;
 type ServerNameList = List<ServerName, u16>;
 
 proto_enum! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum ECPointFormat: u8 {
         Uncompressed = 0,
     }
@@ -205,7 +212,7 @@ proto_enum! {
 type ECPointFormatList = List<ECPointFormat, u8>;
 
 proto_enum! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum NamedGroup: u16 {
         /* Elliptic Curve Groups (ECDHE) */
         Secp256r1 = 0x0017,
@@ -225,7 +232,7 @@ proto_enum! {
 type NamedGroupList = List<NamedGroup, u16>;
 
 proto_struct! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Alert {
         level: AlertLevel,
         description: AlertDescription,
@@ -233,7 +240,7 @@ proto_struct! {
 }
 
 proto_enum! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum AlertLevel: u8 {
         Warning = 1,
         Fatal = 2,
@@ -241,7 +248,7 @@ proto_enum! {
 }
 
 proto_enum! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum AlertDescription: u8 {
         CloseNotify = 0,
         UnexpectedMessage = 10,
@@ -408,7 +415,7 @@ macro_rules! proto_enum {
                         },
                     )*
 
-                    _ => Err(ErrorKind::InvalidFrame(Box::new(kind)).into()),
+                    _ => Err(ErrorKind::InvalidFrame(Box::new(format!("invalid discriminant for {}: 0x{kind:x?}", stringify!($name)))).into()),
                 }
             }
 
@@ -435,7 +442,24 @@ macro_rules! proto_enum {
 }
 use proto_enum;
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Todo;
+
+impl Value for Todo {
+    fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        todo!()
+    }
+
+    fn read<R: Read>(r: &mut R) -> crate::Result<Self> {
+        todo!()
+    }
+
+    fn byte_size(&self) -> usize {
+        todo!()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct List<T, Len>(Vec<T>, PhantomData<Len>);
 
 impl<T, Len: Value> From<Vec<T>> for List<T, Len> {
@@ -605,3 +629,6 @@ macro_rules! discard {
     ($($tt:tt)*) => {};
 }
 use discard;
+
+#[cfg(test)]
+mod tests;
