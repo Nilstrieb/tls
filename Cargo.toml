@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 byteorder = "1.4.3"
 rand = "0.8.5"
+x25519-dalek = "2.0.0"

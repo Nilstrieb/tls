@@ -25,6 +25,10 @@ struct ClientSetupConnection {}
 impl ClientSetupConnection {
     fn establish(host: &str, port: u16) -> Result<Self> {
         let mut stream = BufWriter::new(LoggingWriter(TcpStream::connect((host, port))?));
+
+        let secret = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
+        let public = x25519_dalek::PublicKey::from(&secret);
+
         let handshake = proto::Handshake::ClientHello {
             legacy_version: proto::LEGACY_TLSV12,
             random: rand::random(),
@@ -47,12 +51,12 @@ impl ClientSetupConnection {
                 // passing this doesnt work and shows up as TLSv1.2 in wireshark and gives a handshake error
                 /*proto::ExtensionCH::KeyShare {
                     entries: vec![proto::KeyShareEntry::X25519 {
-                        len: 32,
-                        key_exchange: rand::random(),
+                        len: public.as_bytes().len().try_into().unwrap(),
+                        key_exchange: *public.as_bytes(),
                     }]
                     .into(),
-                },
-                proto::ExtensionCH::SignatureAlgorithms {
+                },*/
+                /*proto::ExtensionCH::SignatureAlgorithms {
                     supported_signature_algorithms: vec![proto::SignatureScheme::ED25519].into(),
                 },*/
                 proto::ExtensionCH::SupportedVersions {
