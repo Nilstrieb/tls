@@ -2,30 +2,31 @@ pub mod proto;
 
 use std::{
     fmt::Debug,
-    io::{self, BufWriter, Read, Write},
-    net::TcpStream,
+    io::{self, Read, Write},
 };
 
 use crate::proto::TLSPlaintext;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-pub struct ClientConnection {}
+pub struct ClientConnection<W> {
+    _w: W,
+}
 
-impl ClientConnection {
-    pub fn establish(host: &str, port: u16) -> Result<Self> {
-        let _setup = ClientSetupConnection::establish(host, port)?;
+impl<W: Read + Write> ClientConnection<W> {
+    pub fn establish(w: W, host: &str) -> Result<Self> {
+        let _setup = ClientSetupConnection::establish(w, host)?;
 
         todo!()
     }
 }
 
-struct ClientSetupConnection {}
+struct ClientSetupConnection<W> {
+    _w: W,
+}
 
-impl ClientSetupConnection {
-    fn establish(host: &str, port: u16) -> Result<Self> {
-        let mut stream = BufWriter::new(LoggingWriter(TcpStream::connect((host, port))?));
-
+impl<W: Read + Write> ClientSetupConnection<W> {
+    fn establish(mut stream: W, host: &str) -> Result<Self> {
         let secret = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
         let public = x25519_dalek::PublicKey::from(&secret);
 
@@ -82,7 +83,7 @@ impl ClientSetupConnection {
         plaintext.write(&mut stream)?;
         stream.flush()?;
 
-        let out = proto::TLSPlaintext::read(stream.get_mut())?;
+        let out = proto::TLSPlaintext::read(&mut stream)?;
         dbg!(&out);
 
         if matches!(out, TLSPlaintext::Handshake { handshake } if handshake.is_hello_retry_request())
@@ -125,7 +126,7 @@ impl From<ErrorKind> for Error {
 }
 
 #[derive(Debug)]
-struct LoggingWriter<W>(W);
+pub struct LoggingWriter<W>(pub W);
 
 impl<W: io::Write> io::Write for LoggingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
