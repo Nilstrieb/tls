@@ -15,6 +15,8 @@ pub enum TLSPlaintext {
         legacy_version: ProtocolVersion,
         fragment: List<u8, u16>,
     },
+    /// This only exists for compatibility and must be sent immediately before the second flight. 
+    /// If this is received with the single byte value `0x01`, then it should just be dropped.
     ChangeCipherSpec,
     Alert {
         alert: Alert,
@@ -110,7 +112,9 @@ proto_enum! {
         } = 2,
         NewSessionTicket {} = 4,
         EndOfEarlyData {} = 5,
-        EncryptedExtensions {} = 8,
+        EncryptedExtensions {
+            extensions: List<ExtensionEE, u16>,
+        } = 8,
         Certificate {} = 11,
         CertificateRequest {} = 13,
         CertificateVerify {} = 15,
@@ -196,6 +200,26 @@ proto_enum! {
         } = 51,
     }
 }
+
+proto_enum! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum ExtensionEE: u16, (length: u16) {
+        ServerName {
+            server_name: ServerNameList,
+        } = 0,
+        MaxFragmentLength { todo: Todo, } = 1,
+        SupportedGroups {
+            groups: NamedGroupList,
+        } = 10,
+        UseSrtp { todo: Todo, } = 14,
+        Heartbeat { todo: Todo, } = 15,
+        ApplicationLayerProtocolNegotiation { todo: Todo, } = 16,
+        ClientCertificateType { todo: Todo, } = 19,
+        ServerCertificateType { todo: Todo, } = 20,
+        EarlyData { todo: Todo, } = 42,
+    }
+}
+
 
 proto_enum! {
     #[derive(Debug, Clone, PartialEq, Eq)]

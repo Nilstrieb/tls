@@ -1,3 +1,4 @@
+mod crypt;
 pub mod proto;
 
 use std::{
@@ -58,7 +59,6 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                 proto::ExtensionCH::SupportedGroups {
                     groups: vec![proto::NamedGroup::X25519].into(),
                 },
-                // passing this doesnt work and shows up as TLSv1.2 in wireshark and gives a handshake error
                 proto::ExtensionCH::KeyShare {
                     entries: vec![proto::KeyShareEntry::X25519 {
                         len: public.as_bytes().len().try_into().unwrap(),
@@ -178,6 +178,8 @@ impl<W: Read + Write> ClientSetupConnection<W> {
         let dh_shared_secret = secret.diffie_hellman(&server_key);
 
         println!("we have established a shared secret. dont leak it!! anywhere here is it: {:x?}", dh_shared_secret.as_bytes());
+
+        dbg!(proto::TLSPlaintext::read(&mut stream))?;
 
         todo!()
     }
