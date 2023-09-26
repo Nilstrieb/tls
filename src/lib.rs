@@ -25,16 +25,25 @@ struct ClientSetupConnection<W> {
     _w: W,
 }
 
+macro_rules! unexpected_message {
+    ($($tt:tt)*) => {
+        Err(ErrorKind::UnexpectedMessage(format!($($tt)*)).into())
+    };
+}
+
 impl<W: Read + Write> ClientSetupConnection<W> {
     fn establish(mut stream: W, host: &str) -> Result<Self> {
         let secret = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
         let public = x25519_dalek::PublicKey::from(&secret);
 
+        let legacy_session_id = rand::random::<[u8; 32]>();
+        let cipher_suites = vec![proto::CipherSuite::TLS_AES_128_GCM_SHA256];
+
         let handshake = proto::Handshake::ClientHello {
             legacy_version: proto::LEGACY_TLSV12,
             random: rand::random(),
-            legacy_session_id: rand::random::<[u8; 32]>().to_vec().into(),
-            cipher_suites: vec![proto::CipherSuite::TLS_AES_128_GCM_SHA256].into(),
+            legacy_session_id: legacy_session_id.to_vec().into(),
+            cipher_suites: cipher_suites.clone().into(),
             legacy_compressions_methods: vec![0].into(),
             extensions: vec![
                 proto::ExtensionCH::ServerName {
@@ -86,13 +95,89 @@ impl<W: Read + Write> ClientSetupConnection<W> {
         let out = proto::TLSPlaintext::read(&mut stream)?;
         dbg!(&out);
 
-        if matches!(out, TLSPlaintext::Handshake { handshake } if handshake.is_hello_retry_request())
-        {
-            println!("hello retry request, the server doesnt like us :(");
+        let proto::TLSPlaintext::Handshake {
+            handshake:
+                proto::Handshake::ServerHello {
+                    legacy_version,
+                    random,
+                    legacy_session_id_echo,
+                    cipher_suite,
+                    legacy_compression_method,
+                    extensions,
+                },
+        } = out
+        else {
+            return Err(
+                ErrorKind::UnexpectedMessage(format!("expected ServerHello, got {out:?}")).into(),
+            );
+        };
+
+        if random.is_hello_retry_request() {
+            return Err(ErrorKind::HelloRetryRequest.into());
         }
 
-        // let res: proto::TLSPlaintext = proto::Value::read(&mut stream.get_mut())?;
-        // dbg!(res);
+        if legacy_version != proto::LEGACY_TLSV12 {
+            return unexpected_message!(
+                "unexpected TLS version in legacy_version field: {legacy_version:x?}"
+            );
+        }
+
+        if legacy_session_id_echo.as_ref() != legacy_session_id {
+            return unexpected_message!(
+                "server did not echo the legacy_session_id: {legacy_session_id_echo:?}"
+            );
+        }
+
+        if !cipher_suites.contains(&cipher_suite) {
+            return unexpected_message!(
+                "cipher suite from server not sent in client hello: {cipher_suite:?}"
+            );
+        }
+
+        if legacy_compression_method != 0 {
+            return unexpected_message!(
+                "legacy compression method MUST be zero: {legacy_compression_method}"
+            );
+        }
+
+        let mut supported_versions = false;
+        let mut server_key = None;
+
+        for ext in extensions.as_ref() {
+            match ext {
+                proto::ExtensionSH::PreSharedKey => todo!(),
+                proto::ExtensionSH::SupportedVersions { selected_version } => {
+                    if *selected_version != proto::TLSV13 {
+                        return unexpected_message!("server returned non-TLS 1.3 version: {selected_version}");
+                    }
+                    supported_versions = true;
+                },
+                proto::ExtensionSH::Cookie { .. } => todo!(),
+                proto::ExtensionSH::KeyShare { key_share } => {
+                    let entry = key_share.unwrap_server_hello();
+                    match entry {
+                        proto::KeyShareEntry::X25519 { len, key_exchange } => {
+                            if *len != 32 {
+                                return unexpected_message!("key length for X25519 key share must be 32: {len}");
+                            }
+                            server_key = Some(key_exchange);
+                        },
+                    }
+                },
+            }
+        }
+
+        if !supported_versions {
+            return unexpected_message!("server did not send supported_versions extension");
+        }
+
+        let Some(server_key) = server_key else {
+            return unexpected_message!("server did not send its key");
+        };
+        let server_key = x25519_dalek::PublicKey::from(*server_key);
+        let dh_shared_secret = secret.diffie_hellman(&server_key);
+
+        println!("we have established a shared secret. dont leak it!! anywhere here is it: {:x?}", dh_shared_secret.as_bytes());
 
         todo!()
     }
@@ -106,6 +191,8 @@ pub struct Error {
 #[derive(Debug)]
 pub enum ErrorKind {
     InvalidFrame(Box<dyn Debug>),
+    HelloRetryRequest,
+    UnexpectedMessage(String),
     Io(io::Error),
 }
 

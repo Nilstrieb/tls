@@ -234,6 +234,12 @@ impl<T, Len: Value> From<Vec<T>> for List<T, Len> {
     }
 }
 
+impl<T, Len> AsRef<[T]> for List<T, Len> {
+    fn as_ref(&self) -> &[T] {
+        self.0.as_ref()
+    }
+}
+
 impl<T: Debug, Len> Debug for List<T, Len> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.0.iter()).finish()

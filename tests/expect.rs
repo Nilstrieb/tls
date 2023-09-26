@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::io::{Read, Write};
 
 struct ExpectServer {
@@ -62,5 +64,5 @@ fn connect() {
         Expect::Client(vec![0]), // TODO: do this
     ]);
 
-    let conn = tls::ClientConnection::establish(&mut expect, "example.com").unwrap();
+    tls::ClientConnection::establish(&mut expect, "example.com").unwrap();
 }

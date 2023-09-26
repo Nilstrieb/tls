@@ -358,6 +358,15 @@ pub enum ServerHelloKeyshare {
     ServerHello(KeyShareEntry),
 }
 
+impl ServerHelloKeyshare {
+    pub fn unwrap_server_hello(&self) -> &KeyShareEntry {
+        match self {
+            Self::HelloRetryRequest(_) => panic!("unexpected hello retry request, expected server hello"),
+            Self::ServerHello(entry) => entry,
+        }
+    }
+}
+
 impl Value for ServerHelloKeyshare {
     fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         match self {
@@ -382,9 +391,9 @@ impl Value for ServerHelloKeyshare {
     }
 }
 
-impl Handshake {
+impl ServerHelloRandom {
     pub fn is_hello_retry_request(&self) -> bool {
-        matches!(self, Handshake::ServerHello { random, .. } if random.0 == HELLO_RETRY_REQUEST)
+        self.0 == HELLO_RETRY_REQUEST
     }
 }
 
