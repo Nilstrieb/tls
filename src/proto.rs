@@ -15,16 +15,26 @@ pub enum TLSPlaintext {
         legacy_version: ProtocolVersion,
         fragment: List<u8, u16>,
     },
-    /// This only exists for compatibility and must be sent immediately before the second flight. 
+    /// This only exists for compatibility and must be sent immediately before the second flight.
     /// If this is received with the single byte value `0x01`, then it should just be dropped.
-    ChangeCipherSpec,
+    ///
+    /// An implementation may receive an unencrypted record of type
+    /// change_cipher_spec consisting of the single byte value 0x01 at any
+    /// time after the first ClientHello message has been sent or received
+    /// and before the peer's Finished message has been received and MUST
+    /// simply drop it without further processing.
+    ChangeCipherSpec {
+        data: List<u8, u16>,
+    },
     Alert {
         alert: Alert,
     },
     Handshake {
         handshake: Handshake,
     },
-    ApplicationData,
+    ApplicationData {
+        data: Vec<u8>,
+    },
 }
 
 impl TLSPlaintext {
@@ -36,9 +46,24 @@ impl TLSPlaintext {
 
     pub fn write(&self, w: &mut impl Write) -> io::Result<()> {
         match self {
-            TLSPlaintext::Invalid { .. } => todo!(),
-            TLSPlaintext::ChangeCipherSpec => todo!(),
-            TLSPlaintext::Alert { .. } => todo!(),
+            TLSPlaintext::Invalid { .. } => {
+                Self::INVALID.write(w)?;
+                LEGACY_TLSV12.write(w)?;
+
+                todo!()
+            }
+            TLSPlaintext::ChangeCipherSpec { data: body } => {
+                Self::CHANGE_CIPHER_SPEC.write(w)?;
+                LEGACY_TLSV12.write(w)?;
+                body.write(w)?;
+                Ok(())
+            }
+            TLSPlaintext::Alert { .. } => {
+                Self::ALERT.write(w)?;
+                LEGACY_TLSV12.write(w)?;
+
+                todo!()
+            }
             TLSPlaintext::Handshake { handshake } => {
                 Self::HANDSHAKE.write(w)?;
                 // MUST be set to 0x0303 for all records
@@ -55,7 +80,14 @@ impl TLSPlaintext {
                 handshake.write(w)?;
                 Ok(())
             }
-            TLSPlaintext::ApplicationData => todo!(),
+            TLSPlaintext::ApplicationData { data } => {
+                Self::APPLICATION_DATA.write(w)?;
+                LEGACY_TLSV12.write(w)?;
+                let len: u16 = data.len().try_into().unwrap();
+                len.write(w)?;
+                w.write_all(&data)?;
+                Ok(())
+            }
         }
     }
 
@@ -63,10 +95,19 @@ impl TLSPlaintext {
         let r = &mut FrameReader::new(r);
         let discr = u8::read(r)?;
         let _legacy_version = ProtocolVersion::read(r)?;
-        let _len = u16::read(r)?;
+        let len = u16::read(r)?;
+        if len > 2_u16.pow(14) {
+            return Err(crate::ErrorKind::InvalidFrame(Box::new(format!(
+                "TLSPLaintext opaque length exceeds 2^14: {len}"
+            )))
+            .into());
+        }
         match discr {
             Self::INVALID => todo!(),
-            Self::CHANGE_CIPHER_SPEC => todo!(),
+            Self::CHANGE_CIPHER_SPEC => {
+                let data = List::read_for_byte_length(len.into(), r)?;
+                Ok(Self::ChangeCipherSpec { data })
+            }
             Self::ALERT => {
                 let alert = Alert::read(r)?;
                 Ok(Self::Alert { alert })
@@ -75,7 +116,12 @@ impl TLSPlaintext {
                 let handshake = Handshake::read(r)?;
                 Ok(TLSPlaintext::Handshake { handshake })
             }
-            Self::APPLICATION_DATA => todo!(),
+            Self::APPLICATION_DATA => {
+                let data = List::<u8, u16>::read_for_byte_length(len.into(), r)?;
+                Ok(Self::ApplicationData {
+                    data: data.into_inner(),
+                })
+            }
             _ => {
                 return Err(crate::ErrorKind::InvalidFrame(Box::new(format!(
                     "Invalid record discriminant: {discr}"
@@ -83,6 +129,16 @@ impl TLSPlaintext {
                 .into())
             }
         }
+    }
+}
+
+// https://datatracker.ietf.org/doc/html/rfc8446#section-5.2
+proto_struct! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct TlsCiphertext {
+        pub opaque_type: u8,
+        pub legacy_record_version: u8,
+        pub encrypted_record: List<u8, u16>,
     }
 }
 
@@ -219,7 +275,6 @@ proto_enum! {
         EarlyData { todo: Todo, } = 42,
     }
 }
-
 
 proto_enum! {
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -385,7 +440,9 @@ pub enum ServerHelloKeyshare {
 impl ServerHelloKeyshare {
     pub fn unwrap_server_hello(&self) -> &KeyShareEntry {
         match self {
-            Self::HelloRetryRequest(_) => panic!("unexpected hello retry request, expected server hello"),
+            Self::HelloRetryRequest(_) => {
+                panic!("unexpected hello retry request, expected server hello")
+            }
             Self::ServerHello(entry) => entry,
         }
     }

@@ -53,14 +53,14 @@ macro_rules! proto_struct {
 
 
         impl crate::proto::ser_de::Value for $name {
-            fn write<W: Write>(&self, mut w: &mut W) -> io::Result<()> {
+            fn write<W: std::io::Write>(&self, mut w: &mut W) -> std::io::Result<()> {
                 $(
                     crate::proto::ser_de::Value::write(&self.$field_name, &mut w)?;
                 )*
                 Ok(())
             }
 
-            fn read<R: Read>(r: &mut $crate::proto::ser_de::FrameReader<R>) -> crate::Result<Self> {
+            fn read<R: std::io::Read>(r: &mut $crate::proto::ser_de::FrameReader<R>) -> crate::Result<Self> {
                 let ( $( $field_name ),* ) = ($( { crate::proto::ser_de::discard!($field_name); crate::proto::ser_de::Value::read(r)? } ),*);
 
                 Ok(Self {
@@ -248,17 +248,8 @@ impl<T: Debug, Len> Debug for List<T, Len> {
 
 impl<T: Value, Len: Value + Into<usize> + TryFrom<usize> + Default> Value for List<T, Len> {
     fn read<R: Read>(r: &mut FrameReader<R>) -> crate::Result<Self> {
-        eprintln!("reading a list");
-        let mut remaining_byte_size = Len::read(r)?.into();
-        let mut v = Vec::new();
-        eprintln!("list.. remaining bytes {remaining_byte_size}");
-        while remaining_byte_size > 0 {
-            eprintln!("things {remaining_byte_size} {v:?}");
-            let value = T::read(r)?;
-            remaining_byte_size -= value.byte_size();
-            v.push(value);
-        }
-        Ok(Self(v, PhantomData))
+        let remaining_byte_size = Len::read(r)?.into();
+        Self::read_for_byte_length(remaining_byte_size, r)
     }
     fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let byte_size = self.0.iter().map(Value::byte_size).sum::<usize>();
@@ -275,6 +266,22 @@ impl<T: Value, Len: Value + Into<usize> + TryFrom<usize> + Default> Value for Li
     }
     fn byte_size(&self) -> usize {
         Len::byte_size(&Default::default()) + self.0.iter().map(Value::byte_size).sum::<usize>()
+    }
+}
+
+impl<T: Value, Len: Value + Into<usize> + TryFrom<usize> + Default> List<T, Len> {
+    pub fn read_for_byte_length<R: Read>(mut remaining_byte_size: usize, r: &mut FrameReader<R>) -> crate::Result<Self> {
+        let mut v = Vec::new();
+        while remaining_byte_size > 0 {
+            let value = T::read(r)?;
+            remaining_byte_size -= value.byte_size();
+            v.push(value);
+        }
+        Ok(Self(v, PhantomData))
+    }
+
+    pub fn into_inner(self) -> Vec<T> {
+        self.0
     }
 }
 
