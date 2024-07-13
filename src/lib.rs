@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod crypt;
 pub mod proto;
 
@@ -7,7 +9,6 @@ use std::{
     io::{self, Read, Write},
 };
 
-use crypt::{SeqId, SeqIdGen};
 use proto::CipherSuite;
 
 use crate::proto::TLSPlaintext;
@@ -61,7 +62,6 @@ mod stream_state {
 
         pub fn write_record(&mut self, plaintext: TLSPlaintext) -> Result<SeqId> {
             plaintext.write(&mut self.stream)?;
-            self.stream.flush()?;
             Ok(self.write_seq_id.next())
         }
 
@@ -305,7 +305,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         dh_shared_secret.as_bytes()
                     );
 
-                    crypt::compute_keys(dh_shared_secret);
+                    crypt::compute_keys(dh_shared_secret, cipher_suite);
 
                     ConnectState::WaitEncryptedExtensions
                 }
@@ -396,3 +396,10 @@ impl<R: Read> io::Read for LoggingWriter<R> {
         len
     }
 }
+
+pub trait LoggingWriterExt: Sized {
+    fn log(self) -> LoggingWriter<Self> {
+        LoggingWriter(self)
+    }
+}
+impl<W: io::Write> LoggingWriterExt for W {}

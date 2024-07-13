@@ -106,7 +106,7 @@ macro_rules! proto_enum {
         impl crate::proto::ser_de::Value for $name {
             fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
                 w.flush()?;
-                eprintln!("{}", stringify!($name));
+                //eprintln!("{}", stringify!($name));
                 mod discr_consts {
                     $(
                         #[allow(non_upper_case_globals)]
@@ -116,7 +116,7 @@ macro_rules! proto_enum {
 
                 let write_len = |_w: &mut W, _len: usize| -> io::Result<()> {
                     _w.flush()?;
-                    eprintln!("length");
+                    //eprintln!("length");
                     $(
                         <$len_ty>::try_from(_len).unwrap().write(_w)?;
                     )?
@@ -137,7 +137,7 @@ macro_rules! proto_enum {
 
                             $($(
                                 w.flush()?;
-                                eprintln!("{}", stringify!($field_name));
+                                //eprintln!("{}", stringify!($field_name));
                                 crate::proto::ser_de::Value::write($field_name, w)?;
                             )*)?
 
