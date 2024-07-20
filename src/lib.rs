@@ -9,7 +9,8 @@ use std::{
     io::{self, Read, Write},
 };
 
-use proto::CipherSuite;
+use crypt::{KeysAfterServerHello, TranscriptHash};
+use proto::{ser_de::Value, CipherSuite};
 
 use crate::proto::TLSPlaintext;
 
@@ -122,8 +123,11 @@ enum ConnectState {
         legacy_session_id: [u8; 32],
         secret: RefCell<Option<x25519_dalek::EphemeralSecret>>,
         cipher_suites: Vec<CipherSuite>,
+        transcript: RefCell<TranscriptHash>,
     },
-    WaitEncryptedExtensions,
+    WaitEncryptedExtensions {
+        keys: RefCell<Option<KeysAfterServerHello>>,
+    },
     WaitCertificateRequest,
     WaitCertificate,
     WaitCertificateVerify,
@@ -193,18 +197,24 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         ]
                         .into(),
                     };
+
+                    let mut transcript = TranscriptHash::new();
+                    transcript.handshake(&handshake);
+
                     let plaintext = proto::TLSPlaintext::Handshake { handshake };
                     self.stream.write_flush_record(plaintext)?;
                     ConnectState::WaitServerHello {
                         legacy_session_id,
                         secret: RefCell::new(Some(secret)),
                         cipher_suites,
+                        transcript: RefCell::new(transcript),
                     }
                 }
                 ConnectState::WaitServerHello {
                     legacy_session_id,
                     secret,
                     cipher_suites,
+                    transcript,
                 } => {
                     let (frame, seq_id) = self.stream.read_record()?;
                     if frame.should_drop() {
@@ -212,7 +222,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                     }
                     let proto::TLSPlaintext::Handshake {
                         handshake:
-                            proto::Handshake::ServerHello {
+                            handshake @ proto::Handshake::ServerHello {
                                 legacy_version,
                                 random,
                                 legacy_session_id_echo,
@@ -220,7 +230,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                                 legacy_compression_method,
                                 extensions,
                             },
-                    } = frame
+                    } = &frame
                     else {
                         return unexpected_message!("expected ServerHello, got {frame:?}");
                     };
@@ -229,7 +239,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         return Err(ErrorKind::HelloRetryRequest.into());
                     }
 
-                    if legacy_version != proto::LEGACY_TLSV12 {
+                    if *legacy_version != proto::LEGACY_TLSV12 {
                         return unexpected_message!(
                             "unexpected TLS version in legacy_version field: {legacy_version:x?}"
                         );
@@ -247,11 +257,13 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         );
                     }
 
-                    if legacy_compression_method != 0 {
+                    if *legacy_compression_method != 0 {
                         return unexpected_message!(
                             "legacy compression method MUST be zero: {legacy_compression_method}"
                         );
                     }
+
+                    transcript.borrow_mut().handshake(&handshake);
 
                     let mut supported_versions = false;
                     let mut server_key = None;
@@ -305,11 +317,17 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         dh_shared_secret.as_bytes()
                     );
 
-                    crypt::compute_keys(dh_shared_secret, cipher_suite);
+                    let keys = crypt::KeysAfterServerHello::compute(
+                        dh_shared_secret,
+                        *cipher_suite,
+                        &transcript.borrow(),
+                    );
 
-                    ConnectState::WaitEncryptedExtensions
+                    ConnectState::WaitEncryptedExtensions {
+                        keys: RefCell::new(Some(keys)),
+                    }
                 }
-                ConnectState::WaitEncryptedExtensions => {
+                ConnectState::WaitEncryptedExtensions { keys } => {
                     let (frame, seq_id) = self.stream.read_record()?;
                     if frame.should_drop() {
                         continue;
@@ -317,7 +335,15 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                     let proto::TLSPlaintext::ApplicationData { data } = frame else {
                         return unexpected_message!("expected ApplicationData, got {frame:?}");
                     };
-                    //crypt::TlsCiphertext::from(data).decrypt(key, seq_id.to_nonce());
+                    // Encrypted with server_handshake_traffic_secret
+                    crypt::TlsCiphertext::from(data).decrypt(
+                        &keys
+                            .borrow()
+                            .as_ref()
+                            .unwrap()
+                            .server_handshake_traffic_secret,
+                        seq_id.to_nonce(),
+                    );
 
                     todo!()
                 }

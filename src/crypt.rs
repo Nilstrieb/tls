@@ -3,15 +3,19 @@
 use crate::proto::{
     self,
     ser_de::{proto_enum, proto_struct, Value},
+    Handshake,
 };
 use hkdf::{hmac::Hmac, HmacImpl};
 use ring::aead::{self, Nonce};
 pub use seq::{SeqId, SeqIdGen};
-use sha2::digest::{
-    core_api::{self, CoreProxy},
-    generic_array::ArrayLength,
-    typenum::Unsigned,
-    OutputSizeUser,
+use sha2::{
+    digest::{
+        core_api::{self, CoreProxy},
+        generic_array::ArrayLength,
+        typenum::Unsigned,
+        OutputSizeUser,
+    },
+    Digest,
 };
 use x25519_dalek::SharedSecret;
 
@@ -27,7 +31,7 @@ impl From<Vec<u8>> for TlsCiphertext {
     }
 }
 
-trait HkdfHasher: OutputSizeUser {
+trait TlsHasher: OutputSizeUser {
     const ZEROED: &'static [u8];
     fn expand(ikm: &[u8], label: &[u8], okm: &mut [u8]) -> Result<(), hkdf::InvalidLength>;
     fn extract(salt: &[u8], ikm: &[u8]) -> Vec<u8>;
@@ -47,10 +51,10 @@ macro_rules! impl_hkdf_hasher {
         }
     };
 }
-impl HkdfHasher for sha2::Sha256 {
+impl TlsHasher for sha2::Sha256 {
     impl_hkdf_hasher!();
 }
-impl HkdfHasher for sha2::Sha384 {
+impl TlsHasher for sha2::Sha384 {
     impl_hkdf_hasher!();
 }
 
@@ -58,7 +62,7 @@ impl HkdfHasher for sha2::Sha384 {
 // https://datatracker.ietf.org/doc/html/rfc8446#section-7.1
 
 // The Hash function used by Transcript-Hash and HKDF is the cipher suite hash algorithm
-fn hkdf_expand_label<H: HkdfHasher>(secret: &[u8], label: &[u8], context: &[u8]) -> Vec<u8> {
+fn hkdf_expand_label<H: TlsHasher>(secret: &[u8], label: &[u8], context: &[u8]) -> Vec<u8> {
     proto_struct! {
         #[derive(Debug)]
         pub struct HkdfLabel {
@@ -70,7 +74,7 @@ fn hkdf_expand_label<H: HkdfHasher>(secret: &[u8], label: &[u8], context: &[u8])
     let mut hkdf_label = Vec::new();
     HkdfLabel {
         // Hash.length is its output length in bytes
-        length: H::output_size().try_into().unwrap(),
+        length: <H as OutputSizeUser>::output_size().try_into().unwrap(),
         label: {
             let mut v = b"tls13 ".to_vec();
             v.extend_from_slice(label);
@@ -83,28 +87,47 @@ fn hkdf_expand_label<H: HkdfHasher>(secret: &[u8], label: &[u8], context: &[u8])
 
     let mut okm = [0u8; 128];
     H::expand(secret, &hkdf_label, &mut okm).unwrap();
-    okm[..H::output_size()].to_vec()
+    okm[..<H as OutputSizeUser>::output_size()].to_vec()
 }
 
 /// Messages is the concatenation of the indicated handshake messages,
 /// including the handshake message type and length fields, but not
 /// including record layer headers.
-fn derive_secret<H: HkdfHasher>(secret: &[u8], label: &[u8], messages: ()) -> Vec<u8> {
-    hkdf_expand_label::<H>(secret, label, &[])
+fn derive_secret<H: TlsHasher>(secret: &[u8], label: &[u8], messages_hash: &[u8]) -> Vec<u8> {
+    hkdf_expand_label::<H>(secret, label, messages_hash)
 }
 
 pub struct CryptoProvider {
     zeroed_of_hash_size: &'static [u8],
     hkdf_extract: fn(salt: &[u8], ikm: &[u8]) -> Vec<u8>,
-    derive_secret: fn(secret: &[u8], label: &[u8], messages: ()) -> Vec<u8>,
+    derive_secret: fn(secret: &[u8], label: &[u8], messages_hash: &[u8]) -> Vec<u8>,
 }
 impl CryptoProvider {
-    fn new<H: HkdfHasher>() -> Self {
+    fn new<H: TlsHasher>() -> Self {
         CryptoProvider {
             zeroed_of_hash_size: H::ZEROED,
             hkdf_extract: H::extract,
             derive_secret: derive_secret::<H>,
         }
+    }
+}
+
+pub struct TranscriptHash {
+    state: sha2::Sha256,
+}
+impl TranscriptHash {
+    pub fn new() -> Self {
+        Self {
+            state: sha2::Sha256::new(),
+        }
+    }
+    pub fn handshake(&mut self, handshake: &Handshake) {
+        let mut buf = Vec::new();
+        handshake.write(&mut buf);
+        self.state.update(&buf);
+    }
+    pub fn get_current(&self) -> Vec<u8> {
+        self.state.clone().finalize().to_vec()
     }
 }
 
@@ -159,53 +182,79 @@ impl CryptoProvider {
                                    = resumption_master_secret
 ```
 */
-pub fn compute_keys(shared_secret: SharedSecret, algo: proto::CipherSuite) {
-    let provider = match algo {
-        proto::CipherSuite::TLS_AES_128_GCM_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
-        proto::CipherSuite::TLS_AES_256_GCM_SHA384 => CryptoProvider::new::<sha2::Sha384>(),
-        proto::CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
-        proto::CipherSuite::TLS_AES_128_CCM_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
-        proto::CipherSuite::TLS_AES_128_CCM_8_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
-    };
 
-    let early_secret =
-        (provider.hkdf_extract)(&provider.zeroed_of_hash_size, &provider.zeroed_of_hash_size);
+pub struct KeysAfterServerHello {
+    provider: CryptoProvider,
+    handhske_secret: Vec<u8>,
+    pub client_handshake_traffic_secret: Vec<u8>,
+    pub server_handshake_traffic_secret: Vec<u8>,
+    master_secret: Vec<u8>,
+}
 
-    let handhske_secret = (provider.hkdf_extract)(
-        &(provider.derive_secret)(&early_secret, b"derived", (/*empty*/)),
-        shared_secret.as_bytes(),
-    );
+impl KeysAfterServerHello {
+    pub fn compute(
+        shared_secret: SharedSecret,
+        algo: proto::CipherSuite,
+        transcript: &TranscriptHash,
+    ) -> Self {
+        let provider = match algo {
+            proto::CipherSuite::TLS_AES_128_GCM_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
+            proto::CipherSuite::TLS_AES_256_GCM_SHA384 => {
+                todo!("anyhting but SHA256")
+                // CryptoProvider::new::<sha2::Sha384>()
+            }
+            proto::CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => {
+                CryptoProvider::new::<sha2::Sha256>()
+            }
+            proto::CipherSuite::TLS_AES_128_CCM_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
+            proto::CipherSuite::TLS_AES_128_CCM_8_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
+        };
 
-    let client_handshake_traffic_secret = (provider.derive_secret)(
-        &handhske_secret,
-        b"c hs traffic",
-        (/*clienthello..serverhello*/),
-    );
+        let early_secret =
+            (provider.hkdf_extract)(&provider.zeroed_of_hash_size, &provider.zeroed_of_hash_size);
 
-    let server_handshake_traffic_secret = (provider.derive_secret)(
-        &handhske_secret,
-        b"s hs traffic",
-        (/*clienthello..serverhello*/),
-    );
+        let handhske_secret = (provider.hkdf_extract)(
+            &(provider.derive_secret)(&early_secret, b"derived", &transcript.get_current()),
+            shared_secret.as_bytes(),
+        );
 
-    let master_secret = (provider.hkdf_extract)(
-        &(provider.derive_secret)(&handhske_secret, b"derived", (/*empty*/)),
-        &provider.zeroed_of_hash_size,
-    );
+        let client_handshake_traffic_secret =
+            (provider.derive_secret)(&handhske_secret, b"c hs traffic", &transcript.get_current());
 
-    let client_application_traffic_secret_0 = (provider.derive_secret)(
-        &master_secret,
-        b"c ap traffic",
-        (/*clienthello..server finished*/),
-    );
-    let server_application_traffic_secret_0 = (provider.derive_secret)(
-        &master_secret,
-        b"s ap traffic",
-        (/*clienthello..server finished*/),
-    );
+        let server_handshake_traffic_secret =
+            (provider.derive_secret)(&handhske_secret, b"s hs traffic", &transcript.get_current());
 
+        let master_secret = (provider.hkdf_extract)(
+            &(provider.derive_secret)(
+                &handhske_secret,
+                b"derived",
+                &sha2::Sha256::new().finalize(),
+            ),
+            &provider.zeroed_of_hash_size,
+        );
 
-    dbg!("keys");
+        Self {
+            provider,
+            handhske_secret,
+            client_handshake_traffic_secret,
+            server_handshake_traffic_secret,
+            master_secret,
+        }
+    }
+
+    fn after_handshake(self, transcript: &TranscriptHash) {
+        let client_application_traffic_secret_0 = (self.provider.derive_secret)(
+            &self.master_secret,
+            b"c ap traffic",
+            &transcript.get_current(),
+        );
+        let server_application_traffic_secret_0 = (self.provider.derive_secret)(
+            &self.master_secret,
+            b"s ap traffic",
+            &transcript.get_current(),
+        );
+        todo!()
+    }
 }
 
 pub struct AeadKey {
@@ -264,13 +313,11 @@ fn proto_algo_to_ring(algo: proto::CipherSuite) -> &'static aead::Algorithm {
     }
 }
 
-fn encrypt(key: AeadKey, message: &[u8], seq: u8) -> Vec<u8> {
+fn encrypt(key: AeadKey, message: &[u8], seq: u8, nonce: Nonce) -> Vec<u8> {
     let total_len = message.len() + key.key.algorithm().tag_len();
     let mut ciphertext_payload = Vec::with_capacity(total_len);
     ciphertext_payload.extend_from_slice(message);
 
-    // FIXME: dont use zero obviously
-    let nonce = aead::Nonce::assume_unique_for_key([0; aead::NONCE_LEN]);
     // FIXME: fill out the AAD properly
     let aad = aead::Aad::from([0; 5]);
     key.key
@@ -278,6 +325,12 @@ fn encrypt(key: AeadKey, message: &[u8], seq: u8) -> Vec<u8> {
         .unwrap();
 
     ciphertext_payload
+}
+
+fn decrypt(key: AeadKey, msg: &mut [u8], nonce: Nonce) {
+    // FIXME: fill out the AAD properly
+    let aad = aead::Aad::from([0; 5]);
+    key.key.open_in_place(nonce, aad, msg);
 }
 
 pub struct TlsInnerPlaintext {
@@ -289,7 +342,18 @@ pub struct TlsInnerPlaintext {
 }
 
 impl TlsCiphertext {
-    pub fn decrypt(&self, key: AeadKey, nonce: Nonce) -> TlsInnerPlaintext {
-        todo!()
+    pub fn decrypt(mut self, secret: &[u8], nonce: Nonce) -> TlsInnerPlaintext {
+        let key = hkdf_expand_label::<sha2::Sha256>(secret, b"key", &[]);
+        let iv = hkdf_expand_label::<sha2::Sha256>(secret, b"iv", &[]);
+
+        let key = AeadKey::new(proto::CipherSuite::TLS_AES_128_GCM_SHA256, secret);
+
+        decrypt(key, &mut self.encrypted_record, nonce);
+
+        TlsInnerPlaintext {
+            content: self.encrypted_record,
+            content_type: 0,
+            padding_len: 0,
+        }
     }
 }
