@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-mod crypt;
+mod crypto;
 pub mod proto;
 
 use std::{
@@ -9,7 +9,7 @@ use std::{
     io::{self, Read, Write},
 };
 
-use crypt::{KeysAfterServerHello, TranscriptHash};
+use crypto::keys::{KeysAfterServerHello, TranscriptHash};
 use proto::{ser_de::Value, CipherSuite};
 
 use crate::proto::TLSPlaintext;
@@ -38,7 +38,7 @@ struct ClientSetupConnection<W> {
 mod stream_state {
     use std::io::{Read, Write};
 
-    use crate::crypt::{SeqId, SeqIdGen};
+    use crate::crypto::{SeqId, SeqIdGen};
     use crate::proto::{self, TLSPlaintext};
     use crate::Result;
 
@@ -317,7 +317,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         dh_shared_secret.as_bytes()
                     );
 
-                    let keys = crypt::KeysAfterServerHello::compute(
+                    let keys = KeysAfterServerHello::compute(
                         dh_shared_secret,
                         *cipher_suite,
                         &transcript.borrow(),
@@ -336,7 +336,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         return unexpected_message!("expected ApplicationData, got {frame:?}");
                     };
                     // Encrypted with server_handshake_traffic_secret
-                    crypt::TlsCiphertext::from(data).decrypt(
+                    crypto::TlsCiphertext::from(data).decrypt(
                         &keys
                             .borrow()
                             .as_ref()
