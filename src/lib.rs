@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 mod crypto;
 pub mod proto;
 
@@ -10,7 +8,10 @@ use std::{
 };
 
 use crypto::keys::{KeysAfterServerHello, TranscriptHash};
-use proto::{ser_de::Value, CipherSuite};
+use proto::{
+    ser_de::{FrameReader, Value},
+    CipherSuite, TlsCiphertext,
+};
 
 use crate::proto::TLSPlaintext;
 
@@ -117,6 +118,7 @@ https://datatracker.ietf.org/doc/html/rfc8446#appendix-A.1
                           CONNECTED
 ```
 */
+#[allow(dead_code)]
 enum ConnectState {
     Start,
     WaitServerHello {
@@ -216,7 +218,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                     cipher_suites,
                     transcript,
                 } => {
-                    let (frame, seq_id) = self.stream.read_record()?;
+                    let (frame, _seq_id) = self.stream.read_record()?;
                     if frame.should_drop() {
                         continue;
                     }
@@ -332,11 +334,13 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                     if frame.should_drop() {
                         continue;
                     }
-                    let proto::TLSPlaintext::ApplicationData { data } = frame else {
+                    // Frame is a TLSCiphertext.
+                    let proto::TLSPlaintext::ApplicationData { data: encrypted_record } = frame else {
                         return unexpected_message!("expected ApplicationData, got {frame:?}");
                     };
                     // Encrypted with server_handshake_traffic_secret
-                    crypto::TlsCiphertext::from(data).decrypt(
+                    crypto::aead::decrypt_ciphertext(
+                        &encrypted_record,
                         &keys
                             .borrow()
                             .as_ref()

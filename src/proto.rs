@@ -38,11 +38,11 @@ pub enum TLSPlaintext {
 }
 
 impl TLSPlaintext {
-    const INVALID: u8 = 0;
-    const CHANGE_CIPHER_SPEC: u8 = 20;
-    const ALERT: u8 = 21;
-    const HANDSHAKE: u8 = 22;
-    const APPLICATION_DATA: u8 = 23;
+    pub const INVALID: u8 = 0;
+    pub const CHANGE_CIPHER_SPEC: u8 = 20;
+    pub const ALERT: u8 = 21;
+    pub const HANDSHAKE: u8 = 22;
+    pub const APPLICATION_DATA: u8 = 23;
 
     pub fn write(&self, w: &mut impl Write) -> io::Result<()> {
         match self {

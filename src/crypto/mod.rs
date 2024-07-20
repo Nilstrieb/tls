@@ -3,36 +3,8 @@
 pub mod aead;
 pub mod keys;
 
-use crate::proto::{
-    self,
-    ser_de::{proto_enum, proto_struct, Value},
-    Handshake,
-};
-use hkdf::{hmac::Hmac, HmacImpl};
-use ring::aead::Nonce;
 pub use seq::{SeqId, SeqIdGen};
-use sha2::{
-    digest::{
-        core_api::{self, CoreProxy},
-        generic_array::ArrayLength,
-        typenum::Unsigned,
-        OutputSizeUser,
-    },
-    Digest,
-};
-use x25519_dalek::SharedSecret;
-
-pub struct TlsCiphertext {
-    /// The encrypted [`TlsInnerPlaintext`] record.
-    pub encrypted_record: Vec<u8>,
-}
-impl From<Vec<u8>> for TlsCiphertext {
-    fn from(value: Vec<u8>) -> Self {
-        TlsCiphertext {
-            encrypted_record: value,
-        }
-    }
-}
+use sha2::digest::{typenum::Unsigned, OutputSizeUser};
 
 trait TlsHasher: OutputSizeUser {
     const ZEROED: &'static [u8];
@@ -47,7 +19,7 @@ macro_rules! impl_hkdf_hasher {
             hkdf::Hkdf::<Self>::new(None, ikm).expand(&label, okm)
         }
         fn extract(salt: &[u8], ikm: &[u8]) -> Vec<u8> {
-            hkdf::Hkdf::<Self>::extract(Some(&[]), &[])
+            hkdf::Hkdf::<Self>::extract(Some(salt), ikm)
                 .0
                 .as_slice()
                 .to_vec()
@@ -79,7 +51,7 @@ impl CryptoProvider {
 mod seq {
     use std::cell::Cell;
 
-    use ring::aead::{self, Nonce};
+    use super::aead::Nonce;
 
     /// The sequence ID generator.
     /// There is a separate one maintained for reading and writing.
@@ -100,13 +72,14 @@ mod seq {
     pub struct SeqId(u64);
     impl SeqId {
         pub fn to_nonce(self) -> Nonce {
-            let mut nonce = [0; aead::NONCE_LEN];
+            let mut nonce = [0; 12];
             nonce[4..].copy_from_slice(&self.0.to_be_bytes());
-            Nonce::assume_unique_for_key(nonce)
+            Nonce::from(nonce)
         }
     }
 }
 
+#[allow(dead_code)]
 pub struct TlsInnerPlaintext {
     /// The `TLSPlaintext.fragment`` value
     pub content: Vec<u8>,

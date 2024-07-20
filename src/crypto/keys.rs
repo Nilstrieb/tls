@@ -1,4 +1,4 @@
-use sha2::{digest::OutputSizeUser, Digest};
+use sha2::Digest;
 use x25519_dalek::SharedSecret;
 
 use crate::proto::{self, ser_de::Value};
@@ -9,7 +9,12 @@ use super::{CryptoProvider, TlsHasher};
 // https://datatracker.ietf.org/doc/html/rfc8446#section-7.1
 
 // The Hash function used by Transcript-Hash and HKDF is the cipher suite hash algorithm
-pub(super) fn hkdf_expand_label<H: TlsHasher>(secret: &[u8], label: &[u8], context: &[u8]) -> Vec<u8> {
+pub(super) fn hkdf_expand_label<H: TlsHasher>(
+    secret: &[u8],
+    label: &[u8],
+    context: &[u8],
+    length: usize,
+) -> Vec<u8> {
     proto::ser_de::proto_struct! {
         #[derive(Debug)]
         pub struct HkdfLabel {
@@ -21,7 +26,7 @@ pub(super) fn hkdf_expand_label<H: TlsHasher>(secret: &[u8], label: &[u8], conte
     let mut hkdf_label = Vec::new();
     HkdfLabel {
         // Hash.length is its output length in bytes
-        length: <H as OutputSizeUser>::output_size().try_into().unwrap(),
+        length: length.try_into().unwrap(),
         label: {
             let mut v = b"tls13 ".to_vec();
             v.extend_from_slice(label);
@@ -34,14 +39,18 @@ pub(super) fn hkdf_expand_label<H: TlsHasher>(secret: &[u8], label: &[u8], conte
 
     let mut okm = [0u8; 128];
     H::expand(secret, &hkdf_label, &mut okm).unwrap();
-    okm[..<H as OutputSizeUser>::output_size()].to_vec()
+    okm[..length].to_vec()
 }
 
 /// Messages is the concatenation of the indicated handshake messages,
 /// including the handshake message type and length fields, but not
 /// including record layer headers.
-pub(super) fn derive_secret<H: TlsHasher>(secret: &[u8], label: &[u8], messages_hash: &[u8]) -> Vec<u8> {
-    hkdf_expand_label::<H>(secret, label, messages_hash)
+pub(super) fn derive_secret<H: TlsHasher>(
+    secret: &[u8],
+    label: &[u8],
+    messages_hash: &[u8],
+) -> Vec<u8> {
+    hkdf_expand_label::<H>(secret, label, messages_hash, H::output_size())
 }
 
 pub struct TranscriptHash {
@@ -117,7 +126,6 @@ impl TranscriptHash {
 
 pub struct KeysAfterServerHello {
     provider: CryptoProvider,
-    handhske_secret: Vec<u8>,
     pub client_handshake_traffic_secret: Vec<u8>,
     pub server_handshake_traffic_secret: Vec<u8>,
     master_secret: Vec<u8>,
@@ -167,20 +175,20 @@ impl KeysAfterServerHello {
 
         Self {
             provider,
-            handhske_secret,
             client_handshake_traffic_secret,
             server_handshake_traffic_secret,
             master_secret,
         }
     }
 
+    #[allow(dead_code)]
     fn after_handshake(self, transcript: &TranscriptHash) {
-        let client_application_traffic_secret_0 = (self.provider.derive_secret)(
+        let _client_application_traffic_secret_0 = (self.provider.derive_secret)(
             &self.master_secret,
             b"c ap traffic",
             &transcript.get_current(),
         );
-        let server_application_traffic_secret_0 = (self.provider.derive_secret)(
+        let _server_application_traffic_secret_0 = (self.provider.derive_secret)(
             &self.master_secret,
             b"s ap traffic",
             &transcript.get_current(),
