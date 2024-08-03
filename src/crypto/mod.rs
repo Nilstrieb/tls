@@ -36,14 +36,12 @@ impl TlsHasher for sha2::Sha384 {
 pub struct CryptoProvider {
     zeroed_of_hash_size: &'static [u8],
     hkdf_extract: fn(salt: &[u8], ikm: &[u8]) -> Vec<u8>,
-    derive_secret: fn(secret: &[u8], label: &[u8], messages_hash: &[u8]) -> Vec<u8>,
 }
 impl CryptoProvider {
     fn new<H: TlsHasher>() -> Self {
         CryptoProvider {
             zeroed_of_hash_size: H::ZEROED,
             hkdf_extract: H::extract,
-            derive_secret: keys::derive_secret::<H>,
         }
     }
 }
@@ -51,7 +49,7 @@ impl CryptoProvider {
 mod seq {
     use std::cell::Cell;
 
-    use super::aead::Nonce;
+    use super::aead::{Nonce, TlsNonce};
 
     /// The sequence ID generator.
     /// There is a separate one maintained for reading and writing.
@@ -71,10 +69,15 @@ mod seq {
     // Don't implement `Clone` to ensure every seq id is only used once.
     pub struct SeqId(u64);
     impl SeqId {
-        pub fn to_nonce(self) -> Nonce {
+        pub fn to_nonce(self) -> TlsNonce {
+            // <https://datatracker.ietf.org/doc/html/rfc8446#section-5.3>
+            // 1. The 64-bit record sequence number is encoded in network byte
+            //    order and padded to the left with zeros to iv_length.
             let mut nonce = [0; 12];
-            nonce[4..].copy_from_slice(&self.0.to_be_bytes());
-            Nonce::from(nonce)
+            nonce[4..12].copy_from_slice(&self.0.to_be_bytes());
+            let nonce = Nonce::from(nonce);
+
+            TlsNonce::new(nonce)
         }
     }
 }

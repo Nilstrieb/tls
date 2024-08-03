@@ -270,7 +270,10 @@ impl<T: Value, Len: Value + Into<usize> + TryFrom<usize> + Default> Value for Li
 }
 
 impl<T: Value, Len: Value + Into<usize> + TryFrom<usize> + Default> List<T, Len> {
-    pub fn read_for_byte_length<R: Read>(mut remaining_byte_size: usize, r: &mut FrameReader<R>) -> crate::Result<Self> {
+    pub fn read_for_byte_length<R: Read>(
+        mut remaining_byte_size: usize,
+        r: &mut FrameReader<R>,
+    ) -> crate::Result<Self> {
         let mut v = Vec::new();
         while remaining_byte_size > 0 {
             let value = T::read(r)?;

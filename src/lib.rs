@@ -8,10 +8,7 @@ use std::{
 };
 
 use crypto::keys::{KeysAfterServerHello, TranscriptHash};
-use proto::{
-    ser_de::{FrameReader, Value},
-    CipherSuite, TlsCiphertext,
-};
+use proto::CipherSuite;
 
 use crate::proto::TLSPlaintext;
 
@@ -149,6 +146,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                     let public = x25519_dalek::PublicKey::from(&secret);
 
                     let legacy_session_id = rand::random::<[u8; 32]>();
+                    // Only AES-128 with SHA-256
                     let cipher_suites = vec![proto::CipherSuite::TLS_AES_128_GCM_SHA256];
 
                     let handshake = proto::Handshake::ClientHello {
@@ -335,7 +333,10 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         continue;
                     }
                     // Frame is a TLSCiphertext.
-                    let proto::TLSPlaintext::ApplicationData { data: encrypted_record } = frame else {
+                    let proto::TLSPlaintext::ApplicationData {
+                        data: encrypted_record,
+                    } = frame
+                    else {
                         return unexpected_message!("expected ApplicationData, got {frame:?}");
                     };
                     // Encrypted with server_handshake_traffic_secret

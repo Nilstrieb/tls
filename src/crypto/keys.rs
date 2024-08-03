@@ -1,15 +1,16 @@
-use sha2::Digest;
+use hkdf::Hkdf;
+use sha2::{Digest, Sha256};
 use x25519_dalek::SharedSecret;
 
 use crate::proto::{self, ser_de::Value};
 
-use super::{CryptoProvider, TlsHasher};
+use super::CryptoProvider;
 
 // Key Schedule
 // https://datatracker.ietf.org/doc/html/rfc8446#section-7.1
 
 // The Hash function used by Transcript-Hash and HKDF is the cipher suite hash algorithm
-pub(super) fn hkdf_expand_label<H: TlsHasher>(
+pub(super) fn hkdf_expand_label(
     secret: &[u8],
     label: &[u8],
     context: &[u8],
@@ -38,19 +39,18 @@ pub(super) fn hkdf_expand_label<H: TlsHasher>(
     .unwrap();
 
     let mut okm = [0u8; 128];
-    H::expand(secret, &hkdf_label, &mut okm).unwrap();
+    hkdf::Hkdf::<sha2::Sha256>::from_prk(secret)
+        .unwrap()
+        .expand(&hkdf_label, &mut okm[..length])
+        .unwrap();
     okm[..length].to_vec()
 }
 
 /// Messages is the concatenation of the indicated handshake messages,
 /// including the handshake message type and length fields, but not
 /// including record layer headers.
-pub(super) fn derive_secret<H: TlsHasher>(
-    secret: &[u8],
-    label: &[u8],
-    messages_hash: &[u8],
-) -> Vec<u8> {
-    hkdf_expand_label::<H>(secret, label, messages_hash, H::output_size())
+pub(super) fn derive_secret(secret: &[u8], label: &[u8], messages_hash: &[u8]) -> Vec<u8> {
+    hkdf_expand_label(secret, label, messages_hash, Sha256::output_size())
 }
 
 pub struct TranscriptHash {
@@ -150,26 +150,40 @@ impl KeysAfterServerHello {
             proto::CipherSuite::TLS_AES_128_CCM_8_SHA256 => CryptoProvider::new::<sha2::Sha256>(),
         };
 
-        let early_secret =
-            (provider.hkdf_extract)(&provider.zeroed_of_hash_size, &provider.zeroed_of_hash_size);
-
-        let handhske_secret = (provider.hkdf_extract)(
-            &(provider.derive_secret)(&early_secret, b"derived", &transcript.get_current()),
-            shared_secret.as_bytes(),
+        let (early_secret, _hkdf_use_this_its_nice) = hkdf::Hkdf::<Sha256>::extract(
+            Some(provider.zeroed_of_hash_size),
+            provider.zeroed_of_hash_size,
         );
 
-        let client_handshake_traffic_secret =
-            (provider.derive_secret)(&handhske_secret, b"c hs traffic", &transcript.get_current());
+        let early_secret_derived =
+            derive_secret(&early_secret, b"derived", &sha2::Sha256::new().finalize());
+        println!("early_secret {:?}", early_secret);
 
-        let server_handshake_traffic_secret =
-            (provider.derive_secret)(&handhske_secret, b"s hs traffic", &transcript.get_current());
+        println!("early_secret_derived {:?}", early_secret_derived);
 
-        let master_secret = (provider.hkdf_extract)(
-            &(provider.derive_secret)(
-                &handhske_secret,
-                b"derived",
-                &sha2::Sha256::new().finalize(),
-            ),
+        let (handshake_secret, _) =
+            Hkdf::<Sha256>::extract(Some(&early_secret_derived), shared_secret.as_bytes());
+
+        let client_handshake_traffic_secret = derive_secret(
+            &handshake_secret,
+            b"c hs traffic",
+            &transcript.get_current(),
+        );
+
+        let server_handshake_traffic_secret = derive_secret(
+            &handshake_secret,
+            b"s hs traffic",
+            &transcript.get_current(),
+        );
+
+        let handshake_secret_derived = derive_secret(
+            &handshake_secret,
+            b"derived",
+            &sha2::Sha256::new().finalize(),
+        );
+
+        let (master_secret, _) = Hkdf::<Sha256>::extract(
+            Some(&handshake_secret_derived),
             &provider.zeroed_of_hash_size,
         );
 
@@ -177,18 +191,18 @@ impl KeysAfterServerHello {
             provider,
             client_handshake_traffic_secret,
             server_handshake_traffic_secret,
-            master_secret,
+            master_secret: master_secret.to_vec(),
         }
     }
 
     #[allow(dead_code)]
     fn after_handshake(self, transcript: &TranscriptHash) {
-        let _client_application_traffic_secret_0 = (self.provider.derive_secret)(
+        let _client_application_traffic_secret_0 = derive_secret(
             &self.master_secret,
             b"c ap traffic",
             &transcript.get_current(),
         );
-        let _server_application_traffic_secret_0 = (self.provider.derive_secret)(
+        let _server_application_traffic_secret_0 = derive_secret(
             &self.master_secret,
             b"s ap traffic",
             &transcript.get_current(),
