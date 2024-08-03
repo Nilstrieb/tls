@@ -64,6 +64,11 @@ mod stream_state {
             Ok(self.write_seq_id.next())
         }
 
+        pub fn key_change(&mut self) {
+            self.read_seq_id = SeqIdGen::new();
+            self.write_seq_id = SeqIdGen::new();
+        }
+
         pub fn read_record(&mut self) -> Result<(TLSPlaintext, SeqId)> {
             let seq_id = self.read_seq_id.next();
             let frame = proto::TLSPlaintext::read(&mut self.stream)?;
@@ -312,11 +317,6 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         .unwrap()
                         .diffie_hellman(&server_key);
 
-                    println!(
-                        "we have established a shared secret. dont leak it!! anyways here is it: {:x?}",
-                        dh_shared_secret.as_bytes()
-                    );
-
                     let keys = KeysAfterServerHello::compute(
                         dh_shared_secret,
                         *cipher_suite,
@@ -328,6 +328,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                     }
                 }
                 ConnectState::WaitEncryptedExtensions { keys } => {
+                    self.stream.key_change();
                     let (frame, seq_id) = self.stream.read_record()?;
                     if frame.should_drop() {
                         continue;
@@ -340,7 +341,7 @@ impl<W: Read + Write> ClientSetupConnection<W> {
                         return unexpected_message!("expected ApplicationData, got {frame:?}");
                     };
                     // Encrypted with server_handshake_traffic_secret
-                    crypto::aead::decrypt_ciphertext(
+                    let inner = crypto::aead::decrypt_ciphertext(
                         &encrypted_record,
                         &keys
                             .borrow()

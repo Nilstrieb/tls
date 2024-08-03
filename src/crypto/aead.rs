@@ -65,10 +65,12 @@ pub fn decrypt_ciphertext(
     additional_data[3..].copy_from_slice(&ciphertext_len.to_be_bytes());
 
     // <https://datatracker.ietf.org/doc/html/rfc8446#section-5.3>
+    let nonce = nonce.get_aead_nonce(&iv);
+
     let result = decrypt(
         key,
         encrypted_record,
-        nonce.get_aead_nonce(&iv),
+        nonce,
         &additional_data,
     );
 

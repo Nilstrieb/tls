@@ -157,9 +157,6 @@ impl KeysAfterServerHello {
 
         let early_secret_derived =
             derive_secret(&early_secret, b"derived", &sha2::Sha256::new().finalize());
-        println!("early_secret {:?}", early_secret);
-
-        println!("early_secret_derived {:?}", early_secret_derived);
 
         let (handshake_secret, _) =
             Hkdf::<Sha256>::extract(Some(&early_secret_derived), shared_secret.as_bytes());
